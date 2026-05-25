@@ -398,6 +398,7 @@ class TestDashboardControllerCollections:
         mock_services["sqlite_db"].get_recording_collections_map.return_value = {
             "meeting": [{"id": 7, "name": "Leadership", "description": None}]
         }
+        mock_services["sqlite_db"].get_saved_views.return_value = []
         mock_services["sqlite_db"].get_summaries.return_value = []
         mock_services["sqlite_db"].get_recording_folders.return_value = ["/"]
 
@@ -405,6 +406,82 @@ class TestDashboardControllerCollections:
 
         assert result["collections"][0]["name"] == "Leadership"
         assert result["recordings"][0]["collection_ids"] == [7]
+        assert "saved_views" in result
+
+
+class TestDashboardControllerSavedViews:
+    def test_create_saved_view_success(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].create_saved_view.return_value = {
+            "id": 1,
+            "name": "AI Strategy",
+            "search_query": "roadmap",
+            "collection_id": 2,
+            "date_filter": "2026-05-25",
+            "folder": "/work",
+        }
+
+        result = ctrl.create_saved_view(
+            name=" AI Strategy ",
+            search_query="roadmap",
+            collection_id=2,
+            date_filter="2026-05-25",
+            folder="/work",
+        )
+
+        assert result["ok"] is True
+        assert result["saved_view"]["name"] == "AI Strategy"
+        mock_services["sqlite_db"].create_saved_view.assert_called_once_with(
+            name="AI Strategy",
+            search_query="roadmap",
+            collection_id=2,
+            date_filter="2026-05-25",
+            folder="/work",
+        )
+
+    def test_create_saved_view_requires_name(self, mock_services):
+        ctrl = mock_services["controller"]
+
+        result = ctrl.create_saved_view(name=" ")
+
+        assert result["ok"] is False
+        assert "required" in result["error"].lower()
+
+    def test_create_saved_view_duplicate(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].create_saved_view.side_effect = ValueError("Saved view exists")
+
+        result = ctrl.create_saved_view(name="Reports")
+
+        assert result["ok"] is False
+        assert "exists" in result["error"].lower()
+
+    def test_get_saved_views(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].get_saved_views.return_value = [{"id": 1, "name": "Reports"}]
+
+        result = ctrl.get_saved_views()
+
+        assert result["ok"] is True
+        assert result["saved_views"][0]["name"] == "Reports"
+
+    def test_delete_saved_view_success(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].delete_saved_view.return_value = True
+
+        result = ctrl.delete_saved_view(3)
+
+        assert result["ok"] is True
+        assert result["deleted"] == 3
+
+    def test_delete_saved_view_not_found(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].delete_saved_view.return_value = False
+
+        result = ctrl.delete_saved_view(3)
+
+        assert result["ok"] is False
+        assert "not found" in result["error"].lower()
 
 
 class TestDashboardControllerAudioPath:

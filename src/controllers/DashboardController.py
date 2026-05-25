@@ -90,6 +90,7 @@ class DashboardController:
         latest_summaries = self._sqlite_db_repository.get_latest_summaries_map()
         collections = self._sqlite_db_repository.get_collections_with_counts()
         recording_collections = self._sqlite_db_repository.get_recording_collections_map()
+        saved_views = self._sqlite_db_repository.get_saved_views()
 
         # Map bare name → local filename (preserving actual extension)
         local_map: dict[str, str] = {}
@@ -194,6 +195,7 @@ class DashboardController:
             "recordings": recordings,
             "folders": folders,
             "collections": collections,
+            "saved_views": saved_views,
         }
 
     def upload_recording(self, filename: str, file_data: bytes, label: str = "") -> dict:
@@ -554,6 +556,41 @@ class DashboardController:
         if not removed:
             return {"ok": False, "error": "Recording or collection membership not found"}
         return {"ok": True, "name": bare_name, "collection_id": collection_id}
+
+    # ─── Saved Views ─────────────────────────────────────────────
+
+    def get_saved_views(self) -> dict:
+        return {"ok": True, "saved_views": self._sqlite_db_repository.get_saved_views()}
+
+    def create_saved_view(
+        self,
+        name: str,
+        search_query: str = "",
+        collection_id: int | None = None,
+        date_filter: str = "",
+        folder: str | None = None,
+    ) -> dict:
+        clean_name = name.strip()
+        if not clean_name:
+            return {"ok": False, "error": "Saved view name is required"}
+        normalized_folder = self._normalize_folder_path(folder) if folder is not None else None
+        try:
+            saved_view = self._sqlite_db_repository.create_saved_view(
+                name=clean_name,
+                search_query=search_query,
+                collection_id=collection_id,
+                date_filter=date_filter,
+                folder=normalized_folder,
+            )
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "saved_view": saved_view}
+
+    def delete_saved_view(self, saved_view_id: int) -> dict:
+        deleted = self._sqlite_db_repository.delete_saved_view(saved_view_id)
+        if not deleted:
+            return {"ok": False, "error": f"Saved view '{saved_view_id}' not found"}
+        return {"ok": True, "deleted": saved_view_id}
 
     _DESTINATION_META: dict[str, dict] = {
         "notion": {"label": "Notion", "icon": "bi-journal-bookmark"},

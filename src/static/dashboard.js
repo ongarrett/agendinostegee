@@ -29,6 +29,7 @@ const MOVE_RECORDING_URL = "/api/dashboard/recording";
 const BULK_MOVE_URL = "/api/dashboard/recordings/move";
 const COLLECTIONS_URL = "/api/dashboard/collections";
 const RECORDING_COLLECTIONS_URL = "/api/dashboard/recording";
+const SAVED_VIEWS_URL = "/api/dashboard/saved-views";
 
 const show = (el) => el?.classList.remove("d-none");
 const hide = (el) => el?.classList.add("d-none");
@@ -49,6 +50,8 @@ let _currentCollection = null; // null = all collections; number = collection id
 let _allRecordings = [];     // all recordings from last fetch
 let _allFolders = [];        // all folder paths from last fetch
 let _allCollections = [];    // all collections from last fetch
+let _allSavedViews = [];     // all saved views from last fetch
+let _currentSavedView = null;
 let _recordingFilters = { query: "", date: "" };
 
 function formatDuration(seconds) {
@@ -394,19 +397,80 @@ function currentCollectionName() {
     return collection ? collection.name : null;
 }
 
+function currentSavedViewName() {
+    if (_currentSavedView === null) return null;
+    const savedView = _allSavedViews.find(v => Number(v.id) === _currentSavedView);
+    return savedView ? savedView.name : null;
+}
+
+function filterSummaryForView(view) {
+    const parts = [];
+    if (view.search_query) parts.push(`Search: "${view.search_query}"`);
+    if (view.date_filter) parts.push(`Date: ${view.date_filter}`);
+    if (view.collection_name) parts.push(`Collection: ${view.collection_name}`);
+    if (view.folder !== null && view.folder !== undefined) parts.push(`Folder: ${view.folder || "All"}`);
+    return parts.length > 0 ? parts.join(" · ") : "All recordings";
+}
+
+function currentFilterPayload() {
+    return {
+        search_query: (_recordingFilters.query || "").trim(),
+        collection_id: _currentCollection,
+        date_filter: _recordingFilters.date || "",
+        folder: _currentFolder,
+    };
+}
+
+function renderCurrentFilterSummary() {
+    const el = $("#saved-view-filter-summary");
+    if (!el) return;
+    const payload = currentFilterPayload();
+    const view = {
+        ...payload,
+        collection_name: currentCollectionName(),
+    };
+    el.textContent = filterSummaryForView(view);
+}
+
+function renderSavedViews(savedViews) {
+    const listEl = $("#saved-view-list");
+    if (!listEl) return;
+
+    if (!savedViews || savedViews.length === 0) {
+        listEl.innerHTML = `<div class="small text-muted px-3 py-2">No saved views yet.</div>`;
+        return;
+    }
+
+    listEl.innerHTML = savedViews.map(view => {
+        const id = Number(view.id);
+        const isActive = _currentSavedView === id;
+        return `<div class="saved-view-item ${isActive ? "active" : ""}" data-saved-view-id="${id}">
+            <i class="bi bi-bookmark-star saved-view-icon"></i>
+            <span class="saved-view-name" title="${escapeHtml(filterSummaryForView(view))}">${escapeHtml(view.name)}</span>
+            <button class="btn btn-delete-saved-view" data-saved-view-id="${id}" title="Delete saved view">
+                <i class="bi bi-trash3"></i>
+            </button>
+        </div>`;
+    }).join("");
+}
+
 function renderBreadcrumb(folderPath) {
     const el = $("#folder-breadcrumb");
     if (!el) return;
     const collectionName = currentCollectionName();
+    const savedViewName = currentSavedViewName();
     const collectionSuffix = collectionName
         ? ` <span class="text-muted">in</span> <strong><i class="bi bi-collection me-1"></i>${escapeHtml(collectionName)}</strong>`
         : "";
+    const savedViewSuffix = savedViewName
+        ? ` <span class="text-muted">view</span> <strong><i class="bi bi-bookmark-star me-1"></i>${escapeHtml(savedViewName)}</strong>`
+        : "";
     if (folderPath === null) {
-        el.innerHTML = `<i class="bi bi-collection me-1"></i>All recordings${collectionSuffix}`;
+        el.innerHTML = `<i class="bi bi-collection me-1"></i>All recordings${collectionSuffix}${savedViewSuffix}`;
         return;
     }
     if (folderPath === "/") {
-        el.innerHTML = `<span class="breadcrumb-part" data-folder-path="null"><i class="bi bi-collection me-1"></i>All</span> / <strong>/</strong>${collectionSuffix}`;
+        el.innerHTML = `<span class="breadcrumb-part" data-folder-path="null"><i class="bi bi-collection me-1"></i>All</span> / <strong>/</strong>${collectionSuffix}${savedViewSuffix}`;
         return;
     }
     const parts = folderPath.split("/").filter(p => p);
@@ -421,7 +485,7 @@ function renderBreadcrumb(folderPath) {
             html += ` / <span class="breadcrumb-part" data-folder-path="${built}">${parts[i]}</span>`;
         }
     }
-    el.innerHTML = html + collectionSuffix;
+    el.innerHTML = html + collectionSuffix + savedViewSuffix;
 }
 
 function filterRecordingsByFolder(recordings, folderPath) {
@@ -450,6 +514,34 @@ function filterRecordingsBySearch(recordings) {
         if (date && rec.date !== date) return false;
         return true;
     });
+}
+
+function markSavedViewDirty() {
+    if (_currentSavedView === null) return;
+    _currentSavedView = null;
+    renderSavedViews(_allSavedViews);
+}
+
+function applySavedView(view) {
+    _recordingFilters = {
+        query: view.search_query || "",
+        date: view.date_filter || "",
+    };
+    _currentCollection = view.collection_id === null || view.collection_id === undefined
+        ? null
+        : Number(view.collection_id);
+    _currentFolder = view.folder === undefined ? null : view.folder;
+    _currentSavedView = Number(view.id);
+
+    const recordingSearchInput = $("#recording-search-input");
+    const recordingDateFilter = $("#recording-date-filter");
+    if (recordingSearchInput) recordingSearchInput.value = _recordingFilters.query;
+    if (recordingDateFilter) recordingDateFilter.value = _recordingFilters.date;
+
+    renderFolderTree(_allFolders, _allRecordings);
+    renderCollectionTree(_allCollections, _allRecordings);
+    renderSavedViews(_allSavedViews);
+    renderFilteredTable();
 }
 
 function updateFilterCount(total, filtered) {
@@ -530,6 +622,7 @@ async function loadDashboard() {
         _allRecordings = data.recordings || [];
         _allFolders = data.folders || ["/"];
         _allCollections = data.collections || [];
+        _allSavedViews = data.saved_views || [];
 
         // Update status cards
         $("#count-device").textContent = data.counts.device;
@@ -563,6 +656,7 @@ async function loadDashboard() {
         // Render folder tree
         renderFolderTree(_allFolders, _allRecordings);
         renderCollectionTree(_allCollections, _allRecordings);
+        renderSavedViews(_allSavedViews);
 
         // Render table (filtered by current folder)
         hide(loading);
@@ -604,12 +698,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (recordingSearchInput) {
         recordingSearchInput.addEventListener("input", () => {
+            markSavedViewDirty();
             _recordingFilters.query = recordingSearchInput.value;
             renderFilteredTable();
         });
     }
     if (recordingDateFilter) {
         recordingDateFilter.addEventListener("change", () => {
+            markSavedViewDirty();
             _recordingFilters.date = recordingDateFilter.value;
             renderFilteredTable();
         });
@@ -617,6 +713,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (recordingFilterClear) {
         recordingFilterClear.addEventListener("click", (e) => {
             e.preventDefault();
+            markSavedViewDirty();
             _recordingFilters = { query: "", date: "" };
             _currentCollection = null;
             if (recordingSearchInput) recordingSearchInput.value = "";
@@ -633,6 +730,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (folderItem && !e.target.closest(".folder-actions")) {
             e.preventDefault();
             const path = folderItem.dataset.folderPath;
+            markSavedViewDirty();
             _currentFolder = path === "null" ? null : path;
             renderFolderTree(_allFolders, _allRecordings);
             renderFilteredTable();
@@ -643,6 +741,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (collectionItem) {
             e.preventDefault();
             const id = collectionItem.dataset.collectionId;
+            markSavedViewDirty();
             _currentCollection = id ? Number(id) : null;
             renderCollectionTree(_allCollections, _allRecordings);
             renderFilteredTable();
@@ -654,6 +753,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (bcPart) {
             e.preventDefault();
             const path = bcPart.dataset.folderPath;
+            markSavedViewDirty();
             _currentFolder = path === "null" ? null : path;
             renderFolderTree(_allFolders, _allRecordings);
             renderFilteredTable();
@@ -792,6 +892,110 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
     }
+
+    // ─── Saved Views ─────────────────────────────────────────────
+    const createSavedViewBtn = $("#btn-create-saved-view");
+    const savedViewModalBackdrop = $("#saved-view-modal-backdrop");
+    const savedViewModalClose = $("#saved-view-modal-close");
+    const savedViewModalCancel = $("#saved-view-modal-cancel");
+    const savedViewModalConfirm = $("#saved-view-modal-confirm");
+    const savedViewNameInput = $("#saved-view-name-input");
+    const savedViewModalFeedback = $("#saved-view-modal-feedback");
+
+    function openSavedViewModal() {
+        if (savedViewNameInput) savedViewNameInput.value = "";
+        hide(savedViewModalFeedback);
+        renderCurrentFilterSummary();
+        show(savedViewModalBackdrop);
+        savedViewNameInput?.focus();
+    }
+
+    function closeSavedViewModal() {
+        hide(savedViewModalBackdrop);
+    }
+
+    async function createSavedViewFromModal() {
+        const name = (savedViewNameInput?.value || "").trim();
+        if (!name) {
+            savedViewModalFeedback.className = "small mt-2 text-danger";
+            savedViewModalFeedback.textContent = "Saved view name is required";
+            show(savedViewModalFeedback);
+            return;
+        }
+
+        savedViewModalConfirm.disabled = true;
+        savedViewModalConfirm.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        hide(savedViewModalFeedback);
+        try {
+            const res = await fetch(SAVED_VIEWS_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name, ...currentFilterPayload() }),
+            });
+            const data = await res.json();
+            if (!data.ok) {
+                savedViewModalFeedback.className = "small mt-2 text-danger";
+                savedViewModalFeedback.textContent = data.error || "Failed to save view";
+                show(savedViewModalFeedback);
+                return;
+            }
+            _currentSavedView = data.saved_view.id;
+            closeSavedViewModal();
+            await loadDashboard();
+        } catch (err) {
+            savedViewModalFeedback.className = "small mt-2 text-danger";
+            savedViewModalFeedback.textContent = `Failed: ${err.message}`;
+            show(savedViewModalFeedback);
+        } finally {
+            savedViewModalConfirm.disabled = false;
+            savedViewModalConfirm.innerHTML = '<i class="bi bi-bookmark-plus me-1"></i>Save';
+        }
+    }
+
+    if (createSavedViewBtn) createSavedViewBtn.addEventListener("click", (e) => { e.preventDefault(); openSavedViewModal(); });
+    if (savedViewModalClose) savedViewModalClose.addEventListener("click", closeSavedViewModal);
+    if (savedViewModalCancel) savedViewModalCancel.addEventListener("click", closeSavedViewModal);
+    if (savedViewModalBackdrop) savedViewModalBackdrop.addEventListener("click", (e) => { if (e.target === savedViewModalBackdrop) closeSavedViewModal(); });
+    if (savedViewModalConfirm) savedViewModalConfirm.addEventListener("click", createSavedViewFromModal);
+    if (savedViewNameInput) {
+        savedViewNameInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                savedViewModalConfirm?.click();
+            }
+        });
+    }
+
+    document.addEventListener("click", async (e) => {
+        const deleteBtn = e.target.closest(".btn-delete-saved-view");
+        if (deleteBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const id = Number(deleteBtn.dataset.savedViewId);
+            if (!id) return;
+            try {
+                const res = await fetch(`${SAVED_VIEWS_URL}/${encodeURIComponent(id)}`, { method: "DELETE" });
+                const data = await res.json();
+                if (data.ok) {
+                    if (_currentSavedView === id) _currentSavedView = null;
+                    _allSavedViews = _allSavedViews.filter(view => Number(view.id) !== id);
+                    renderSavedViews(_allSavedViews);
+                    renderFilteredTable();
+                }
+            } catch (err) {
+                console.error("Failed to delete saved view:", err);
+            }
+            return;
+        }
+
+        const savedViewItem = e.target.closest(".saved-view-item");
+        if (savedViewItem) {
+            e.preventDefault();
+            const id = Number(savedViewItem.dataset.savedViewId);
+            const view = _allSavedViews.find(savedView => Number(savedView.id) === id);
+            if (view) applySavedView(view);
+        }
+    });
 
     // ─── Collections ─────────────────────────────────────────────
     const createCollectionBtn = $("#btn-create-collection");

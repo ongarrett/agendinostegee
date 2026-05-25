@@ -124,6 +124,13 @@
                                                 </button>
                                             </div>
                                             <div id="collection-tree" class="folder-tree"></div>
+                                            <div class="folder-sidebar-header d-flex justify-content-between align-items-center border-top">
+                                                <span class="fw-semibold small"><i class="bi bi-bookmark-star me-1"></i>Saved Views</span>
+                                                <button class="btn btn-sm btn-outline-primary" id="btn-create-saved-view" title="Save current view">
+                                                    <i class="bi bi-plus-lg"></i>
+                                                </button>
+                                            </div>
+                                            <div id="saved-view-list" class="folder-tree"></div>
                                         </div>
                                         <!-- Recordings table -->
                                         <div class="col table-responsive">
@@ -481,6 +488,33 @@
                     <p class="mt-2 text-muted">Scanning library…</p>
                 </div>
                 <div id="bulk-import-result" class="mt-3 d-none"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Saved View Modal -->
+    <div id="saved-view-modal-backdrop" class="transcript-modal-backdrop d-none">
+        <div class="transcript-modal" style="max-width: 430px;">
+            <div class="transcript-modal-header" style="background: var(--bs-primary);">
+                <h5 class="mb-0"><i class="bi bi-bookmark-star me-2"></i>Save View</h5>
+                <button type="button" class="btn-close btn-close-white" id="saved-view-modal-close"></button>
+            </div>
+            <div class="transcript-modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-bold" for="saved-view-name-input">Name</label>
+                    <input type="text" class="form-control" id="saved-view-name-input" placeholder="AI Strategy this week">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Current filters</label>
+                    <div id="saved-view-filter-summary" class="saved-view-filter-summary"></div>
+                </div>
+                <div class="text-end">
+                    <button class="btn btn-outline-secondary me-2" id="saved-view-modal-cancel">Cancel</button>
+                    <button class="btn btn-primary" id="saved-view-modal-confirm">
+                        <i class="bi bi-bookmark-plus me-1"></i>Save
+                    </button>
+                </div>
+                <div id="saved-view-modal-feedback" class="small mt-2 d-none"></div>
             </div>
         </div>
     </div>
