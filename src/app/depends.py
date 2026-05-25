@@ -24,6 +24,8 @@ from services.AuthService import AuthService
 from services.BulkImportService import BulkImportService
 from services.ICalSyncService import ICalSyncService
 from services.ProactorService import ProactorService
+from services.GeminiEmbeddingService import GeminiEmbeddingService
+from services.SemanticSearchService import SemanticSearchService
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DOTENV_PATH = PROJECT_ROOT / ".env"
@@ -211,6 +213,18 @@ def get_vector_store_repository() -> VectorStoreRepository:
         persist_path=os.path.join(get_root_path(), "settings/vector_store"),
         api_key=get_gemini_api_key(),
         model=_config["GEMINI_EMBEDDING_MODEL"],
+    )
+
+
+def get_semantic_search_service() -> SemanticSearchService:
+    _config = get_config()
+    api_key = get_gemini_api_key()
+    return SemanticSearchService(
+        sqlite_db_repository=get_sqlite_db_repository(),
+        embedding_service=GeminiEmbeddingService(
+            api_key=api_key,
+            model=_config["GEMINI_EMBEDDING_MODEL"],
+        ),
     )
 
 

@@ -293,3 +293,62 @@ class TestSqliteDBRepository:
 
         with pytest.raises(ValueError):
             db.create_saved_view("reports")
+
+    def test_embedding_status_defaults_to_not_indexed(self, db, sample_recording):
+        db.insert_recording(sample_recording)
+
+        statuses = db.get_recording_embedding_status_map()
+
+        assert statuses[sample_recording.name]["status"] == "not indexed"
+        assert statuses[sample_recording.name]["model"] is None
+
+    def test_save_and_get_indexed_recording_embedding(self, db, sample_recording):
+        db.insert_recording(sample_recording)
+
+        saved = db.save_recording_embedding(
+            sample_recording.name,
+            status="indexed",
+            model="gemini-embedding-001",
+            content_hash="abc123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+
+        assert saved is True
+        statuses = db.get_recording_embedding_status_map()
+        assert statuses[sample_recording.name]["status"] == "indexed"
+        indexed = db.get_indexed_recording_embeddings()
+        assert indexed[0]["name"] == sample_recording.name
+        assert indexed[0]["embedding"] == [0.1, 0.2, 0.3]
+
+    def test_save_failed_recording_embedding(self, db, sample_recording):
+        db.insert_recording(sample_recording)
+
+        db.save_recording_embedding(
+            sample_recording.name,
+            status="failed",
+            model="gemini-embedding-001",
+            error="No content",
+        )
+
+        statuses = db.get_recording_embedding_status_map()
+        assert statuses[sample_recording.name]["status"] == "failed"
+        assert statuses[sample_recording.name]["error"] == "No content"
+        assert db.get_indexed_recording_embeddings() == []
+
+    def test_get_recording_embedding_source_includes_latest_text(self, db, sample_recording):
+        db.insert_recording(sample_recording)
+        db.save_transcript(sample_recording.name, "Transcript text")
+        db.save_summarization_result(
+            sample_recording.name,
+            title="Strategy Call",
+            tags="ai,roadmap",
+            summary="Summary text",
+        )
+
+        source = db.get_recording_embedding_source(sample_recording.name)
+
+        assert source["name"] == sample_recording.name
+        assert source["title"] == "Strategy Call"
+        assert source["tags"] == "ai,roadmap"
+        assert source["summary"] == "Summary text"
+        assert source["transcript"] == "Transcript text"

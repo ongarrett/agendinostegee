@@ -18,6 +18,7 @@ class SqliteDBRepository:
         self._ensure_recording_columns()
         self._ensure_collection_tables()
         self._ensure_saved_view_tables()
+        self._ensure_embedding_tables()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -106,6 +107,32 @@ class SqliteDBRepository:
 
                 CREATE INDEX IF NOT EXISTS idx_saved_view_collection
                     ON saved_view (collection_id);
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _ensure_embedding_tables(self) -> None:
+        """Migration: add recording embedding table for existing local databases."""
+        conn = self._connect()
+        try:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS recording_embedding
+                (
+                    recording_id  INTEGER PRIMARY KEY,
+                    status        TEXT    NOT NULL DEFAULT 'not indexed',
+                    model         TEXT    DEFAULT NULL,
+                    content_hash  TEXT    DEFAULT NULL,
+                    embedding     TEXT    DEFAULT NULL,
+                    error         TEXT    DEFAULT NULL,
+                    indexed_at    TEXT    DEFAULT NULL,
+                    created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+                    updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (recording_id) REFERENCES recording (id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_recording_embedding_status
+                    ON recording_embedding (status);
             """)
             conn.commit()
         finally:
@@ -711,6 +738,175 @@ class SqliteDBRepository:
             result = conn.execute("DELETE FROM saved_view WHERE id = ?", (saved_view_id,))
             conn.commit()
             return result.rowcount > 0
+        finally:
+            conn.close()
+
+    # ─── Recording embedding operations ──────────────────────────
+
+    def get_recording_embedding_status_map(self) -> dict[str, dict]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT
+                    r.name,
+                    re.status,
+                    re.model,
+                    re.error,
+                    re.indexed_at,
+                    re.updated_at
+                FROM recording r
+                LEFT JOIN recording_embedding re ON re.recording_id = r.id
+            """).fetchall()
+            return {
+                row["name"]: {
+                    "status": row["status"] or "not indexed",
+                    "model": row["model"],
+                    "error": row["error"],
+                    "indexed_at": row["indexed_at"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            }
+        finally:
+            conn.close()
+
+    def get_recording_embedding_source(self, name: str) -> dict | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT
+                    r.id,
+                    r.name,
+                    r.label,
+                    r.transcript,
+                    s.title,
+                    s.tags,
+                    s.summary,
+                    re.status,
+                    re.model,
+                    re.content_hash
+                FROM recording r
+                LEFT JOIN recording_embedding re ON re.recording_id = r.id
+                LEFT JOIN (
+                    SELECT s1.*
+                    FROM summary s1
+                    JOIN (
+                        SELECT recording_id, MAX(version) AS max_version
+                        FROM summary
+                        GROUP BY recording_id
+                    ) latest
+                        ON latest.recording_id = s1.recording_id
+                        AND latest.max_version = s1.version
+                ) s ON s.recording_id = r.id
+                WHERE r.name = ?
+                """,
+                (name,),
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                "id": row["id"],
+                "name": row["name"],
+                "label": row["label"],
+                "transcript": row["transcript"] or "",
+                "title": row["title"] or "",
+                "tags": row["tags"] or "",
+                "summary": row["summary"] or "",
+                "embedding_status": row["status"] or "not indexed",
+                "embedding_model": row["model"],
+                "content_hash": row["content_hash"],
+            }
+        finally:
+            conn.close()
+
+    def save_recording_embedding(
+        self,
+        name: str,
+        status: str,
+        model: str | None = None,
+        content_hash: str | None = None,
+        embedding: list[float] | None = None,
+        error: str | None = None,
+    ) -> bool:
+        conn = self._connect()
+        try:
+            recording = conn.execute("SELECT id FROM recording WHERE name = ?", (name,)).fetchone()
+            if not recording:
+                return False
+            embedding_json = json.dumps(embedding) if embedding is not None else None
+            indexed_at_expr = "datetime('now')" if status == "indexed" else "NULL"
+            conn.execute(
+                f"""
+                INSERT INTO recording_embedding
+                    (recording_id, status, model, content_hash, embedding, error, indexed_at, updated_at)
+                VALUES
+                    (?, ?, ?, ?, ?, ?, {indexed_at_expr}, datetime('now'))
+                ON CONFLICT(recording_id) DO UPDATE SET
+                    status = excluded.status,
+                    model = excluded.model,
+                    content_hash = excluded.content_hash,
+                    embedding = excluded.embedding,
+                    error = excluded.error,
+                    indexed_at = {indexed_at_expr},
+                    updated_at = datetime('now')
+                """,
+                (recording["id"], status, model, content_hash, embedding_json, error),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def get_indexed_recording_embeddings(self) -> list[dict]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT
+                    r.name,
+                    r.label,
+                    r.transcript,
+                    s.title,
+                    s.tags,
+                    s.summary,
+                    re.model,
+                    re.embedding,
+                    re.indexed_at
+                FROM recording_embedding re
+                JOIN recording r ON r.id = re.recording_id
+                LEFT JOIN (
+                    SELECT s1.*
+                    FROM summary s1
+                    JOIN (
+                        SELECT recording_id, MAX(version) AS max_version
+                        FROM summary
+                        GROUP BY recording_id
+                    ) latest
+                        ON latest.recording_id = s1.recording_id
+                        AND latest.max_version = s1.version
+                ) s ON s.recording_id = r.id
+                WHERE re.status = 'indexed' AND re.embedding IS NOT NULL
+            """).fetchall()
+            indexed = []
+            for row in rows:
+                try:
+                    embedding = json.loads(row["embedding"])
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                indexed.append(
+                    {
+                        "name": row["name"],
+                        "label": row["label"],
+                        "title": row["title"] or "",
+                        "tags": row["tags"] or "",
+                        "summary": row["summary"] or "",
+                        "transcript": row["transcript"] or "",
+                        "model": row["model"],
+                        "embedding": embedding,
+                        "indexed_at": row["indexed_at"],
+                    }
+                )
+            return indexed
         finally:
             conn.close()
 

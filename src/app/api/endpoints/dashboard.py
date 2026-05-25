@@ -13,6 +13,7 @@ from models.dto.GenerateTasksRequestDTO import GenerateTasksRequestDTO
 from models.dto.MoveRecordingRequestDTO import MoveRecordingRequestDTO, BulkMoveRecordingsRequestDTO
 from models.dto.PublishRequestDTO import PublishRequestDTO
 from models.dto.SavedViewRequestDTO import CreateSavedViewRequestDTO
+from models.dto.SemanticSearchRequestDTO import GenerateEmbeddingsRequestDTO, SemanticSearchRequestDTO
 from models.dto.SummarizeRequestDTO import SummarizeRequestDTO
 from models.dto.TranscribeRequestDTO import TranscribeRequestDTO
 from models.dto.UpdateRecordingRequestDTO import UpdateRecordingRequestDTO
@@ -20,6 +21,7 @@ from models.dto.UpdateSummaryRequestDTO import UpdateSummaryRequestDTO
 from models.dto.UpdateTaskRequestDTO import UpdateTaskRequestDTO
 from models.dto.UpdateTranscriptRequestDTO import UpdateTranscriptRequestDTO
 from services.BulkImportService import BulkImportService
+from services.SemanticSearchService import SemanticSearchService
 
 router = APIRouter()
 
@@ -29,6 +31,22 @@ async def recordings_status(
     dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
 ):
     return dashboard_controller.get_recordings_status()
+
+
+@router.post("/embeddings/generate")
+async def generate_embeddings(
+    body: GenerateEmbeddingsRequestDTO,
+    semantic_search_service: SemanticSearchService = Depends(depends.get_semantic_search_service),
+):
+    return semantic_search_service.index_recordings(body.names, force=body.force)
+
+
+@router.post("/semantic-search")
+async def semantic_search(
+    body: SemanticSearchRequestDTO,
+    semantic_search_service: SemanticSearchService = Depends(depends.get_semantic_search_service),
+):
+    return semantic_search_service.search(body.query, top_k=body.top_k)
 
 
 @router.post("/upload")

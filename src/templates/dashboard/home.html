@@ -144,6 +144,12 @@
                                                     <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
                                                     <input type="date" class="form-control" id="recording-date-filter">
                                                 </div>
+                                                <div class="input-group input-group-sm" style="max-width: 360px;">
+                                                    <span class="input-group-text"><i class="bi bi-diagram-3"></i></span>
+                                                    <input type="search" class="form-control" id="semantic-search-input"
+                                                           placeholder="Semantic search indexed recordings">
+                                                    <button class="btn btn-outline-primary" id="semantic-search-btn" type="button">Search</button>
+                                                </div>
                                                 <button class="btn btn-sm btn-outline-secondary" id="recording-filter-clear"
                                                         type="button" title="Clear filters">
                                                     <i class="bi bi-x-lg"></i>
@@ -171,6 +177,7 @@
                                                         <th class="text-center">DB</th>
                                                         <th>Title</th>
                                                         <th>Tags</th>
+                                                        <th class="text-center">Index</th>
                                                         <th class="text-center">Actions</th>
                                                     </tr>
                                                 </thead>
@@ -181,6 +188,9 @@
                                                 <span id="bulk-selected-count" class="small text-muted me-2"></span>
                                                 <button class="btn btn-sm btn-outline-primary" id="btn-bulk-move" title="Move selected recordings to folder">
                                                     <i class="bi bi-folder-symlink me-1"></i>Move to…
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-secondary" id="btn-bulk-index" title="Generate embeddings for selected recordings">
+                                                    <i class="bi bi-diagram-3 me-1"></i>Index
                                                 </button>
                                             </div>
                                             <div id="empty-state" class="text-center text-muted p-5 d-none">
@@ -624,5 +634,5 @@
 
 {% block extra_js %}
 <script src="/static/hidock-device.js?v=1"></script>
-    <script src="/static/dashboard.js?v=3"></script>
+    <script src="/static/dashboard.js?v=4"></script>
 {% endblock %}
