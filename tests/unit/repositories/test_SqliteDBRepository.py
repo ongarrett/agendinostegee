@@ -249,3 +249,47 @@ class TestSqliteDBRepository:
 
         mapping = db.get_recording_collections_map()
         assert mapping[sample_recording.name][0]["name"] == "Editorial Workflows"
+
+    def test_create_saved_view(self, db):
+        collection = db.create_collection("AI Strategy")
+
+        saved_view = db.create_saved_view(
+            name="Strategy this week",
+            search_query="roadmap",
+            collection_id=collection["id"],
+            date_filter="2026-05-25",
+            folder="/work",
+        )
+
+        assert saved_view["id"] is not None
+        assert saved_view["name"] == "Strategy this week"
+        assert saved_view["search_query"] == "roadmap"
+        assert saved_view["collection_id"] == collection["id"]
+        assert saved_view["collection_name"] == "AI Strategy"
+        assert saved_view["date_filter"] == "2026-05-25"
+        assert saved_view["folder"] == "/work"
+
+    def test_get_saved_views(self, db):
+        db.create_saved_view("Catch-Up", search_query="weekly")
+        db.create_saved_view("Features", date_filter="2026-05-25")
+
+        saved_views = db.get_saved_views()
+
+        assert [view["name"] for view in saved_views] == ["Catch-Up", "Features"]
+
+    def test_delete_saved_view(self, db):
+        saved_view = db.create_saved_view("Delete me", search_query="old")
+
+        deleted = db.delete_saved_view(saved_view["id"])
+
+        assert deleted is True
+        assert db.get_saved_views() == []
+
+    def test_delete_saved_view_not_found(self, db):
+        assert db.delete_saved_view(999999) is False
+
+    def test_create_saved_view_duplicate_name_raises(self, db):
+        db.create_saved_view("Reports")
+
+        with pytest.raises(ValueError):
+            db.create_saved_view("reports")

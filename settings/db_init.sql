@@ -49,6 +49,20 @@ CREATE TABLE IF NOT EXISTS recording_collection
 CREATE INDEX IF NOT EXISTS idx_recording_collection_recording ON recording_collection (recording_id);
 CREATE INDEX IF NOT EXISTS idx_recording_collection_collection ON recording_collection (collection_id);
 
+CREATE TABLE IF NOT EXISTS saved_view
+(
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL UNIQUE,
+    search_query  TEXT    NOT NULL DEFAULT '',
+    collection_id INTEGER DEFAULT NULL,
+    date_filter   TEXT    NOT NULL DEFAULT '',
+    folder        TEXT    DEFAULT NULL,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (collection_id) REFERENCES collection (id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_saved_view_collection ON saved_view (collection_id);
+
 CREATE TABLE IF NOT EXISTS task
 (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,

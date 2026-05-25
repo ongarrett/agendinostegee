@@ -17,6 +17,7 @@ class SqliteDBRepository:
             self._initialize_db(init_sql_script)
         self._ensure_recording_columns()
         self._ensure_collection_tables()
+        self._ensure_saved_view_tables()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -81,6 +82,30 @@ class SqliteDBRepository:
                     ON recording_collection (recording_id);
                 CREATE INDEX IF NOT EXISTS idx_recording_collection_collection
                     ON recording_collection (collection_id);
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _ensure_saved_view_tables(self) -> None:
+        """Migration: add saved view tables for existing local databases."""
+        conn = self._connect()
+        try:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS saved_view
+                (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name          TEXT    NOT NULL UNIQUE,
+                    search_query  TEXT    NOT NULL DEFAULT '',
+                    collection_id INTEGER DEFAULT NULL,
+                    date_filter   TEXT    NOT NULL DEFAULT '',
+                    folder        TEXT    DEFAULT NULL,
+                    created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (collection_id) REFERENCES collection (id) ON DELETE SET NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_saved_view_collection
+                    ON saved_view (collection_id);
             """)
             conn.commit()
         finally:
@@ -579,6 +604,111 @@ class SqliteDBRepository:
                 "DELETE FROM recording_collection WHERE recording_id = ? AND collection_id = ?",
                 (recording["id"], collection_id),
             )
+            conn.commit()
+            return result.rowcount > 0
+        finally:
+            conn.close()
+
+    # ─── Saved view operations ───────────────────────────────────
+
+    @staticmethod
+    def _saved_view_from_row(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "search_query": row["search_query"] or "",
+            "collection_id": row["collection_id"],
+            "collection_name": row["collection_name"] if "collection_name" in row.keys() else None,
+            "date_filter": row["date_filter"] or "",
+            "folder": row["folder"],
+            "created_at": row["created_at"],
+        }
+
+    def get_saved_views(self) -> list[dict]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT
+                    sv.id,
+                    sv.name,
+                    sv.search_query,
+                    sv.collection_id,
+                    c.name AS collection_name,
+                    sv.date_filter,
+                    sv.folder,
+                    sv.created_at
+                FROM saved_view sv
+                LEFT JOIN collection c ON c.id = sv.collection_id
+                ORDER BY lower(sv.name)
+            """).fetchall()
+            return [self._saved_view_from_row(row) for row in rows]
+        finally:
+            conn.close()
+
+    def create_saved_view(
+        self,
+        name: str,
+        search_query: str = "",
+        collection_id: int | None = None,
+        date_filter: str = "",
+        folder: str | None = None,
+    ) -> dict:
+        conn = self._connect()
+        try:
+            clean_name = name.strip()
+            existing = conn.execute(
+                "SELECT id FROM saved_view WHERE lower(name) = lower(?)",
+                (clean_name,),
+            ).fetchone()
+            if existing:
+                raise ValueError(f"Saved view '{clean_name}' already exists")
+
+            if collection_id is not None:
+                collection = conn.execute("SELECT id FROM collection WHERE id = ?", (collection_id,)).fetchone()
+                if not collection:
+                    collection_id = None
+
+            result = conn.execute(
+                """
+                INSERT INTO saved_view (name, search_query, collection_id, date_filter, folder)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (clean_name, search_query.strip(), collection_id, date_filter.strip(), folder),
+            )
+            conn.commit()
+            saved_view_id = int(result.lastrowid)
+            return self.get_saved_view_by_id(saved_view_id)
+        finally:
+            conn.close()
+
+    def get_saved_view_by_id(self, saved_view_id: int) -> dict | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT
+                    sv.id,
+                    sv.name,
+                    sv.search_query,
+                    sv.collection_id,
+                    c.name AS collection_name,
+                    sv.date_filter,
+                    sv.folder,
+                    sv.created_at
+                FROM saved_view sv
+                LEFT JOIN collection c ON c.id = sv.collection_id
+                WHERE sv.id = ?
+                """,
+                (saved_view_id,),
+            ).fetchone()
+            return self._saved_view_from_row(row) if row else None
+        finally:
+            conn.close()
+
+    def delete_saved_view(self, saved_view_id: int) -> bool:
+        conn = self._connect()
+        try:
+            result = conn.execute("DELETE FROM saved_view WHERE id = ?", (saved_view_id,))
             conn.commit()
             return result.rowcount > 0
         finally:

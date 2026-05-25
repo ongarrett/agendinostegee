@@ -12,6 +12,7 @@ from models.dto.FolderRequestDTO import CreateFolderRequestDTO, RenameFolderRequ
 from models.dto.GenerateTasksRequestDTO import GenerateTasksRequestDTO
 from models.dto.MoveRecordingRequestDTO import MoveRecordingRequestDTO, BulkMoveRecordingsRequestDTO
 from models.dto.PublishRequestDTO import PublishRequestDTO
+from models.dto.SavedViewRequestDTO import CreateSavedViewRequestDTO
 from models.dto.SummarizeRequestDTO import SummarizeRequestDTO
 from models.dto.TranscribeRequestDTO import TranscribeRequestDTO
 from models.dto.UpdateRecordingRequestDTO import UpdateRecordingRequestDTO
@@ -327,6 +328,38 @@ async def remove_recording_from_collection(
     dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
 ):
     return dashboard_controller.remove_recording_from_collection(name, collection_id)
+
+
+# Saved views
+
+
+@router.get("/saved-views")
+async def get_saved_views(
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.get_saved_views()
+
+
+@router.post("/saved-views")
+async def create_saved_view(
+    body: CreateSavedViewRequestDTO,
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.create_saved_view(
+        name=body.name,
+        search_query=body.search_query,
+        collection_id=body.collection_id,
+        date_filter=body.date_filter,
+        folder=body.folder,
+    )
+
+
+@router.delete("/saved-views/{saved_view_id}")
+async def delete_saved_view(
+    saved_view_id: int,
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.delete_saved_view(saved_view_id)
 
 
 # Folders
