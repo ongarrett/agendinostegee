@@ -91,6 +91,7 @@ class DashboardController:
         collections = self._sqlite_db_repository.get_collections_with_counts()
         recording_collections = self._sqlite_db_repository.get_recording_collections_map()
         saved_views = self._sqlite_db_repository.get_saved_views()
+        embedding_statuses = self._sqlite_db_repository.get_recording_embedding_status_map()
 
         # Map bare name → local filename (preserving actual extension)
         local_map: dict[str, str] = {}
@@ -175,6 +176,10 @@ class DashboardController:
                     "folder": db_rec.folder if db_rec else "/",
                     "collections": recording_collections.get(bare_name, []),
                     "collection_ids": [c["id"] for c in recording_collections.get(bare_name, [])],
+                    "embedding_status": embedding_statuses.get(bare_name, {}).get("status", "not indexed"),
+                    "embedding_model": embedding_statuses.get(bare_name, {}).get("model"),
+                    "embedding_error": embedding_statuses.get(bare_name, {}).get("error"),
+                    "embedding_indexed_at": embedding_statuses.get(bare_name, {}).get("indexed_at"),
                 }
             )
 

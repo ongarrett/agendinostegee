@@ -399,6 +399,9 @@ class TestDashboardControllerCollections:
             "meeting": [{"id": 7, "name": "Leadership", "description": None}]
         }
         mock_services["sqlite_db"].get_saved_views.return_value = []
+        mock_services["sqlite_db"].get_recording_embedding_status_map.return_value = {
+            "meeting": {"status": "indexed", "model": "gemini-embedding-001", "error": None, "indexed_at": "now"}
+        }
         mock_services["sqlite_db"].get_summaries.return_value = []
         mock_services["sqlite_db"].get_recording_folders.return_value = ["/"]
 
@@ -406,6 +409,7 @@ class TestDashboardControllerCollections:
 
         assert result["collections"][0]["name"] == "Leadership"
         assert result["recordings"][0]["collection_ids"] == [7]
+        assert result["recordings"][0]["embedding_status"] == "indexed"
         assert "saved_views" in result
 
 

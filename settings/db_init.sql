@@ -63,6 +63,22 @@ CREATE TABLE IF NOT EXISTS saved_view
 
 CREATE INDEX IF NOT EXISTS idx_saved_view_collection ON saved_view (collection_id);
 
+CREATE TABLE IF NOT EXISTS recording_embedding
+(
+    recording_id  INTEGER PRIMARY KEY,
+    status        TEXT    NOT NULL DEFAULT 'not indexed',
+    model         TEXT    DEFAULT NULL,
+    content_hash  TEXT    DEFAULT NULL,
+    embedding     TEXT    DEFAULT NULL,
+    error         TEXT    DEFAULT NULL,
+    indexed_at    TEXT    DEFAULT NULL,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (recording_id) REFERENCES recording (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_recording_embedding_status ON recording_embedding (status);
+
 CREATE TABLE IF NOT EXISTS task
 (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,

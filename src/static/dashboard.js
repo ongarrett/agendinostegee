@@ -30,6 +30,8 @@ const BULK_MOVE_URL = "/api/dashboard/recordings/move";
 const COLLECTIONS_URL = "/api/dashboard/collections";
 const RECORDING_COLLECTIONS_URL = "/api/dashboard/recording";
 const SAVED_VIEWS_URL = "/api/dashboard/saved-views";
+const EMBEDDINGS_GENERATE_URL = "/api/dashboard/embeddings/generate";
+const SEMANTIC_SEARCH_URL = "/api/dashboard/semantic-search";
 
 const show = (el) => el?.classList.remove("d-none");
 const hide = (el) => el?.classList.add("d-none");
@@ -53,6 +55,9 @@ let _allCollections = [];    // all collections from last fetch
 let _allSavedViews = [];     // all saved views from last fetch
 let _currentSavedView = null;
 let _recordingFilters = { query: "", date: "" };
+let _semanticResultNames = null;
+let _semanticResultRank = null;
+let _semanticSearchQuery = "";
 
 function formatDuration(seconds) {
     if (seconds == null) return "-";
@@ -76,6 +81,23 @@ function statusBadge(ok, yesIcon = "bi-check-circle-fill", noIcon = "bi-x-circle
         return `<span class="badge-status badge-yes"><i class="bi ${yesIcon}"></i></span>`;
     }
     return `<span class="badge-status badge-no"><i class="bi ${noIcon}"></i></span>`;
+}
+
+function renderEmbeddingStatus(status, error) {
+    const normalized = status || "not indexed";
+    if (normalized === "indexed") {
+        return `<span class="badge bg-success-subtle text-success-emphasis" title="Indexed for semantic search">
+            <i class="bi bi-check-circle me-1"></i>Indexed
+        </span>`;
+    }
+    if (normalized === "failed") {
+        return `<span class="badge bg-danger-subtle text-danger-emphasis" title="${escapeHtml(error || "Embedding failed")}">
+            <i class="bi bi-exclamation-triangle me-1"></i>Failed
+        </span>`;
+    }
+    return `<span class="badge bg-secondary-subtle text-secondary-emphasis" title="Not indexed for semantic search">
+        <i class="bi bi-dash-circle me-1"></i>Not indexed
+    </span>`;
 }
 
 function actionButtons(rec) {
@@ -106,6 +128,7 @@ function actionButtons(rec) {
     if (rec.in_db) {
         btns.push(`<button class="btn btn-sm btn-outline-primary btn-move-recording" data-name="${rec.name}" title="Move to folder"><i class="bi bi-folder-symlink"></i></button>`);
         btns.push(`<button class="btn btn-sm btn-outline-primary btn-manage-collections" data-name="${rec.name}" title="Add to collection"><i class="bi bi-collection"></i></button>`);
+        btns.push(`<button class="btn btn-sm btn-outline-secondary btn-index-recording" data-name="${rec.name}" data-force="${rec.embedding_status === "indexed" ? "true" : "false"}" title="${rec.embedding_status === "indexed" ? "Regenerate embedding" : "Generate embedding"}"><i class="bi bi-diagram-3"></i></button>`);
     }
     if (rec.on_device || rec.on_local || rec.in_db) {
         btns.push(`<button class="btn btn-sm btn-outline-danger btn-delete-recording" data-name="${rec.name}" data-on-device="${rec.on_device}" data-on-local="${rec.on_local}" data-in-db="${rec.in_db}" title="Delete recording…"><i class="bi bi-trash3"></i></button>`);
@@ -170,6 +193,7 @@ function renderRow(rec) {
         <td class="text-center">${statusBadge(rec.in_db)}</td>
         <td>${titleCell}</td>
         <td>${renderTags(rec.db_tags)}</td>
+        <td class="text-center">${renderEmbeddingStatus(rec.embedding_status, rec.embedding_error)}</td>
         <td class="text-center text-nowrap">${actionButtons(rec)}</td>
     </tr>`;
 }
@@ -254,6 +278,10 @@ function mergeDeviceData(serverData, deviceData) {
                 folder: "/",
                 collections: [],
                 collection_ids: [],
+                embedding_status: "not indexed",
+                embedding_model: null,
+                embedding_error: null,
+                embedding_indexed_at: null,
             });
         }
     }
@@ -465,12 +493,15 @@ function renderBreadcrumb(folderPath) {
     const savedViewSuffix = savedViewName
         ? ` <span class="text-muted">view</span> <strong><i class="bi bi-bookmark-star me-1"></i>${escapeHtml(savedViewName)}</strong>`
         : "";
+    const semanticSuffix = _semanticSearchQuery
+        ? ` <span class="text-muted">semantic</span> <strong><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(_semanticSearchQuery)}</strong>`
+        : "";
     if (folderPath === null) {
-        el.innerHTML = `<i class="bi bi-collection me-1"></i>All recordings${collectionSuffix}${savedViewSuffix}`;
+        el.innerHTML = `<i class="bi bi-collection me-1"></i>All recordings${collectionSuffix}${savedViewSuffix}${semanticSuffix}`;
         return;
     }
     if (folderPath === "/") {
-        el.innerHTML = `<span class="breadcrumb-part" data-folder-path="null"><i class="bi bi-collection me-1"></i>All</span> / <strong>/</strong>${collectionSuffix}${savedViewSuffix}`;
+        el.innerHTML = `<span class="breadcrumb-part" data-folder-path="null"><i class="bi bi-collection me-1"></i>All</span> / <strong>/</strong>${collectionSuffix}${savedViewSuffix}${semanticSuffix}`;
         return;
     }
     const parts = folderPath.split("/").filter(p => p);
@@ -485,7 +516,7 @@ function renderBreadcrumb(folderPath) {
             html += ` / <span class="breadcrumb-part" data-folder-path="${built}">${parts[i]}</span>`;
         }
     }
-    el.innerHTML = html + collectionSuffix + savedViewSuffix;
+    el.innerHTML = html + collectionSuffix + savedViewSuffix + semanticSuffix;
 }
 
 function filterRecordingsByFolder(recordings, folderPath) {
@@ -516,13 +547,27 @@ function filterRecordingsBySearch(recordings) {
     });
 }
 
+function filterRecordingsBySemantic(recordings) {
+    if (_semanticResultNames === null) return recordings;
+    return recordings.filter(rec => _semanticResultNames.has(rec.name));
+}
+
 function markSavedViewDirty() {
     if (_currentSavedView === null) return;
     _currentSavedView = null;
     renderSavedViews(_allSavedViews);
 }
 
+function clearSemanticSearch() {
+    _semanticResultNames = null;
+    _semanticResultRank = null;
+    _semanticSearchQuery = "";
+    const semanticSearchInput = $("#semantic-search-input");
+    if (semanticSearchInput) semanticSearchInput.value = "";
+}
+
 function applySavedView(view) {
+    clearSemanticSearch();
     _recordingFilters = {
         query: view.search_query || "",
         date: view.date_filter || "",
@@ -547,7 +592,9 @@ function applySavedView(view) {
 function updateFilterCount(total, filtered) {
     const el = $("#recording-filter-count");
     if (!el) return;
-    const hasFilters = Boolean(_recordingFilters.query || _recordingFilters.date || _currentCollection !== null);
+    const hasFilters = Boolean(
+        _recordingFilters.query || _recordingFilters.date || _currentCollection !== null || _semanticResultNames !== null
+    );
     el.textContent = hasFilters ? `${filtered} of ${total}` : "";
 }
 
@@ -571,7 +618,11 @@ function renderFilteredTable() {
 
     const folderFiltered = filterRecordingsByFolder(_allRecordings, _currentFolder);
     const collectionFiltered = filterRecordingsByCollection(folderFiltered, _currentCollection);
-    const filtered = filterRecordingsBySearch(collectionFiltered);
+    const searchFiltered = filterRecordingsBySearch(collectionFiltered);
+    let filtered = filterRecordingsBySemantic(searchFiltered);
+    if (_semanticResultRank !== null) {
+        filtered = [...filtered].sort((a, b) => _semanticResultRank.get(a.name) - _semanticResultRank.get(b.name));
+    }
     renderBreadcrumb(_currentFolder);
     updateFilterCount(folderFiltered.length, filtered.length);
 
@@ -695,6 +746,89 @@ document.addEventListener("DOMContentLoaded", () => {
     const recordingSearchInput = $("#recording-search-input");
     const recordingDateFilter = $("#recording-date-filter");
     const recordingFilterClear = $("#recording-filter-clear");
+    const semanticSearchInput = $("#semantic-search-input");
+    const semanticSearchBtn = $("#semantic-search-btn");
+
+    function showDashboardAlert(className, message) {
+        const alert = $("#sync-alert");
+        if (!alert) return;
+        alert.className = `alert ${className}`;
+        alert.innerHTML = message;
+        show(alert);
+    }
+
+    async function generateEmbeddings(names, force = false) {
+        if (!names || names.length === 0) {
+            showDashboardAlert("alert-warning", '<i class="bi bi-info-circle me-1"></i>Select at least one recording first.');
+            return;
+        }
+        showDashboardAlert("alert-info", '<span class="spinner-border spinner-border-sm me-1"></span>Generating embeddings…');
+        try {
+            const res = await fetch(EMBEDDINGS_GENERATE_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ names, force }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                const error = data.detail || data.error || "Embedding generation failed.";
+                showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(error)}`);
+                await loadDashboard();
+                return;
+            }
+            const counts = data.counts || {};
+            showDashboardAlert(
+                "alert-success",
+                `<i class="bi bi-check-circle me-1"></i>Indexed ${counts.indexed || 0}; skipped ${counts.skipped || 0}; failed ${counts.failed || 0}.`
+            );
+            await loadDashboard();
+        } catch (err) {
+            showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Embedding generation failed: ${escapeHtml(err.message)}`);
+        }
+    }
+
+    async function runSemanticSearch() {
+        const query = (semanticSearchInput?.value || "").trim();
+        if (!query) {
+            clearSemanticSearch();
+            renderFilteredTable();
+            return;
+        }
+        if (semanticSearchBtn) {
+            semanticSearchBtn.disabled = true;
+            semanticSearchBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        }
+        try {
+            const res = await fetch(SEMANTIC_SEARCH_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query, top_k: 25 }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                const error = data.detail || data.error || "Semantic search failed.";
+                showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(error)}`);
+                return;
+            }
+            const results = data.results || [];
+            _semanticResultNames = new Set(results.map(result => result.name));
+            _semanticResultRank = new Map(results.map((result, index) => [result.name, index]));
+            _semanticSearchQuery = query;
+            renderFilteredTable();
+            const message = data.message || `Semantic search matched ${results.length} indexed recording(s).`;
+            showDashboardAlert(
+                results.length > 0 ? "alert-success" : "alert-info",
+                `<i class="bi bi-diagram-3 me-1"></i>${escapeHtml(message)}`
+            );
+        } catch (err) {
+            showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Semantic search failed: ${escapeHtml(err.message)}`);
+        } finally {
+            if (semanticSearchBtn) {
+                semanticSearchBtn.disabled = false;
+                semanticSearchBtn.innerHTML = "Search";
+            }
+        }
+    }
 
     if (recordingSearchInput) {
         recordingSearchInput.addEventListener("input", () => {
@@ -716,10 +850,31 @@ document.addEventListener("DOMContentLoaded", () => {
             markSavedViewDirty();
             _recordingFilters = { query: "", date: "" };
             _currentCollection = null;
+            clearSemanticSearch();
             if (recordingSearchInput) recordingSearchInput.value = "";
             if (recordingDateFilter) recordingDateFilter.value = "";
             renderCollectionTree(_allCollections, _allRecordings);
             renderFilteredTable();
+        });
+    }
+    if (semanticSearchBtn) {
+        semanticSearchBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            runSemanticSearch();
+        });
+    }
+    if (semanticSearchInput) {
+        semanticSearchInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                runSemanticSearch();
+            }
+        });
+        semanticSearchInput.addEventListener("input", () => {
+            if (!semanticSearchInput.value.trim() && _semanticResultNames !== null) {
+                clearSemanticSearch();
+                renderFilteredTable();
+            }
         });
     }
 
@@ -1323,6 +1478,16 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    const bulkIndexBtn = $("#btn-bulk-index");
+    if (bulkIndexBtn) {
+        bulkIndexBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            const checked = document.querySelectorAll(".rec-checkbox:checked");
+            const names = Array.from(checked).map(cb => cb.dataset.name);
+            generateEmbeddings(names, false);
+        });
+    }
+
     // Move single recording via right-click context or a dedicated button (we add a move button in action buttons area)
     // We'll handle the "move" action from action buttons below
 
@@ -1879,6 +2044,12 @@ document.addEventListener("DOMContentLoaded", () => {
         if (moveBtn) {
             e.preventDefault();
             openMoveFolderModal([moveBtn.dataset.name]);
+        }
+
+        const indexBtn = e.target.closest(".btn-index-recording");
+        if (indexBtn) {
+            e.preventDefault();
+            generateEmbeddings([indexBtn.dataset.name], indexBtn.dataset.force === "true");
         }
     });
 
