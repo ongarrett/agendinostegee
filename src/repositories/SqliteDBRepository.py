@@ -910,6 +910,84 @@ class SqliteDBRepository:
         finally:
             conn.close()
 
+    def get_recording_qa_sources(
+        self,
+        names: list[str] | None = None,
+        collection_id: int | None = None,
+    ) -> list[dict]:
+        conn = self._connect()
+        try:
+            joins = []
+            where = []
+            params = []
+            if collection_id is not None:
+                joins.append("JOIN recording_collection rc ON rc.recording_id = r.id")
+                where.append("rc.collection_id = ?")
+                params.append(collection_id)
+            if names:
+                placeholders = ",".join(["?"] * len(names))
+                where.append(f"r.name IN ({placeholders})")
+                params.extend(names)
+            where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+            join_sql = "\n".join(joins)
+            rows = conn.execute(
+                f"""
+                SELECT
+                    r.name,
+                    r.label,
+                    r.transcript,
+                    s.title,
+                    s.tags,
+                    s.summary,
+                    re.status,
+                    re.model,
+                    re.embedding,
+                    re.indexed_at
+                FROM recording r
+                {join_sql}
+                LEFT JOIN recording_embedding re ON re.recording_id = r.id
+                LEFT JOIN (
+                    SELECT s1.*
+                    FROM summary s1
+                    JOIN (
+                        SELECT recording_id, MAX(version) AS max_version
+                        FROM summary
+                        GROUP BY recording_id
+                    ) latest
+                        ON latest.recording_id = s1.recording_id
+                        AND latest.max_version = s1.version
+                ) s ON s.recording_id = r.id
+                {where_sql}
+                ORDER BY r.name
+                """,
+                params,
+            ).fetchall()
+            sources = []
+            for row in rows:
+                embedding = None
+                if row["embedding"]:
+                    try:
+                        embedding = json.loads(row["embedding"])
+                    except (TypeError, json.JSONDecodeError):
+                        embedding = None
+                sources.append(
+                    {
+                        "name": row["name"],
+                        "label": row["label"],
+                        "title": row["title"] or "",
+                        "tags": row["tags"] or "",
+                        "summary": row["summary"] or "",
+                        "transcript": row["transcript"] or "",
+                        "embedding_status": row["status"] or "not indexed",
+                        "embedding_model": row["model"],
+                        "embedding": embedding,
+                        "indexed_at": row["indexed_at"],
+                    }
+                )
+            return sources
+        finally:
+            conn.close()
+
     # ─── Folder operations ────────────────────────────────────────
 
     def get_recording_folders(self) -> list[str]:

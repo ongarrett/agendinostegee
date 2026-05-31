@@ -352,3 +352,32 @@ class TestSqliteDBRepository:
         assert source["tags"] == "ai,roadmap"
         assert source["summary"] == "Summary text"
         assert source["transcript"] == "Transcript text"
+
+    def test_get_recording_qa_sources_by_names(self, db):
+        rec_a = DBRecording(id=None, name="alpha", label="Alpha", duration=10, created_at=datetime.now())
+        rec_b = DBRecording(id=None, name="beta", label="Beta", duration=10, created_at=datetime.now())
+        db.insert_recording(rec_a)
+        db.insert_recording(rec_b)
+        db.save_transcript("alpha", "Alpha transcript")
+        db.save_summarization_result("alpha", title="Alpha Title", tags="strategy", summary="Alpha summary")
+        db.save_recording_embedding("alpha", status="indexed", model="fake", embedding=[1.0, 0.0])
+
+        sources = db.get_recording_qa_sources(names=["alpha"])
+
+        assert [source["name"] for source in sources] == ["alpha"]
+        assert sources[0]["title"] == "Alpha Title"
+        assert sources[0]["summary"] == "Alpha summary"
+        assert sources[0]["transcript"] == "Alpha transcript"
+        assert sources[0]["embedding"] == [1.0, 0.0]
+
+    def test_get_recording_qa_sources_by_collection(self, db):
+        rec_a = DBRecording(id=None, name="alpha", label="Alpha", duration=10, created_at=datetime.now())
+        rec_b = DBRecording(id=None, name="beta", label="Beta", duration=10, created_at=datetime.now())
+        db.insert_recording(rec_a)
+        db.insert_recording(rec_b)
+        collection = db.create_collection("Strategy")
+        db.add_recording_to_collection("beta", collection["id"])
+
+        sources = db.get_recording_qa_sources(collection_id=collection["id"])
+
+        assert [source["name"] for source in sources] == ["beta"]
