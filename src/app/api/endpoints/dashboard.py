@@ -64,6 +64,8 @@ async def ask_recordings(
         names=body.names,
         collection_id=body.collection_id,
         top_k=body.top_k,
+    )
+
 
 @router.post("/upload")
 async def upload_recording(
