@@ -361,6 +361,88 @@ class DashboardController:
         self._sqlite_db_repository.save_transcript(bare_name, transcript)
         return {"ok": True, "transcript": transcript, "cached": False}
 
+    @staticmethod
+    def _has_saved_transcript(db_rec) -> bool:
+        return db_rec is not None and db_rec.transcript is not None and len(db_rec.transcript) > 0
+
+    def list_untranscribed_recordings(self) -> dict:
+        recordings = self._sqlite_db_repository.get_recordings()
+        untranscribed = []
+        for rec in recordings:
+            if self._has_saved_transcript(rec):
+                continue
+            local_filename, _ = self._resolve_local_filename(rec.name)
+            if not self._local_recordings_repository.exists(local_filename):
+                continue
+            untranscribed.append(
+                {
+                    "name": rec.name,
+                    "label": rec.label,
+                    "file_extension": rec.file_extension,
+                    "recorded_at": rec.recorded_at,
+                }
+            )
+        return {"ok": True, "count": len(untranscribed), "recordings": untranscribed}
+
+    def transcribe_recordings(self, names: list[str], engine: str = "gemini") -> dict:
+        unique_names = []
+        seen = set()
+        for name in names:
+            bare_name = self._bare_name(name)
+            if bare_name and bare_name not in seen:
+                unique_names.append(bare_name)
+                seen.add(bare_name)
+
+        if not unique_names:
+            return {"ok": False, "error": "No recordings selected"}
+
+        results = []
+        counts = {"transcribed": 0, "skipped_existing": 0, "failed": 0}
+
+        for bare_name in unique_names:
+            db_rec = self._sqlite_db_repository.get_recording_by_name(bare_name)
+            if db_rec is None:
+                counts["failed"] += 1
+                results.append({"name": bare_name, "status": "failed", "error": "Recording not found in database"})
+                continue
+
+            if self._has_saved_transcript(db_rec):
+                counts["skipped_existing"] += 1
+                results.append({"name": bare_name, "status": "skipped_existing"})
+                continue
+
+            result = self.transcribe_recording(bare_name, engine=engine)
+            if result.get("ok"):
+                if result.get("cached"):
+                    counts["skipped_existing"] += 1
+                    results.append({"name": bare_name, "status": "skipped_existing"})
+                else:
+                    counts["transcribed"] += 1
+                    results.append({"name": bare_name, "status": "transcribed"})
+            else:
+                counts["failed"] += 1
+                results.append(
+                    {
+                        "name": bare_name,
+                        "status": "failed",
+                        "error": result.get("error", "Transcription failed"),
+                    }
+                )
+
+        return {"ok": counts["failed"] == 0, "counts": counts, "results": results}
+
+    def transcribe_untranscribed_recordings(self, engine: str = "gemini") -> dict:
+        untranscribed = self.list_untranscribed_recordings()
+        names = [rec["name"] for rec in untranscribed["recordings"]]
+        if not names:
+            return {
+                "ok": True,
+                "counts": {"transcribed": 0, "skipped_existing": 0, "failed": 0},
+                "results": [],
+                "message": "No untranscribed local recordings found.",
+            }
+        return self.transcribe_recordings(names, engine=engine)
+
     def get_audio_file_path(self, name: str) -> tuple[str | None, str]:
         """Return (file_path, file_extension) or (None, '') if not found."""
         bare_name = self._bare_name(name)

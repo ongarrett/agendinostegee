@@ -166,6 +166,10 @@
                                                         type="button" title="Index all recordings that are not indexed yet">
                                                     <i class="bi bi-diagram-3 me-1"></i>Index Unindexed
                                                 </button>
+                                                <button class="btn btn-sm btn-outline-primary" id="btn-transcribe-untranscribed"
+                                                        type="button" title="Transcribe local recordings that do not have transcripts">
+                                                    <i class="bi bi-mic me-1"></i>Transcribe Untranscribed
+                                                </button>
                                                 <span id="recording-filter-count" class="small text-muted ms-auto"></span>
                                             </div>
                                             <div id="loading" class="text-center p-4">
@@ -203,6 +207,9 @@
                                                 </button>
                                                 <button class="btn btn-sm btn-outline-secondary" id="btn-bulk-index" title="Generate embeddings for selected recordings">
                                                     <i class="bi bi-diagram-3 me-1"></i>Index
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-primary" id="btn-bulk-transcribe" title="Transcribe selected recordings without transcripts">
+                                                    <i class="bi bi-mic me-1"></i>Transcribe Selected
                                                 </button>
                                                 <button class="btn btn-sm btn-outline-dark" id="btn-bulk-ask-ai" title="Ask AI about selected recordings">
                                                     <i class="bi bi-chat-square-text me-1"></i>Ask AI

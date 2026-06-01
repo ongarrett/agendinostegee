@@ -180,6 +180,81 @@ class TestDashboardControllerTranscribeRecording:
         assert result["ok"] is False
         assert "Transcription failed" in result["error"]
 
+    def test_list_untranscribed_recordings_detects_local_missing_transcripts(self, mock_services):
+        ctrl = mock_services["controller"]
+        missing = DBRecording(
+            id=1,
+            name="missing",
+            label="Missing",
+            duration=10,
+            file_extension="mp3",
+            created_at=datetime.now(),
+            transcript=None,
+        )
+        existing = DBRecording(
+            id=2,
+            name="existing",
+            label="Existing",
+            duration=10,
+            file_extension="mp3",
+            created_at=datetime.now(),
+            transcript="already transcribed",
+        )
+        mock_services["sqlite_db"].get_recordings.return_value = [missing, existing]
+        mock_services["sqlite_db"].get_recording_by_name.side_effect = lambda name: {
+            "missing": missing,
+            "existing": existing,
+        }.get(name)
+        mock_services["local_repo"].exists.side_effect = lambda name: name == "missing.mp3"
+
+        result = ctrl.list_untranscribed_recordings()
+
+        assert result["ok"] is True
+        assert result["count"] == 1
+        assert result["recordings"][0]["name"] == "missing"
+
+    def test_transcribe_recordings_transcribes_missing_transcript(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["local_repo"].exists.return_value = True
+        mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
+            id=1, name="test", label="Test", duration=10, created_at=datetime.now(), transcript=None
+        )
+        mock_services["local_repo"].get_path.return_value = "/path/to/test.hda"
+        mock_services["transcription_service"].transcribe.return_value = "new transcript"
+
+        result = ctrl.transcribe_recordings(["test"])
+
+        assert result["ok"] is True
+        assert result["counts"]["transcribed"] == 1
+        assert result["results"][0]["status"] == "transcribed"
+        mock_services["sqlite_db"].save_transcript.assert_called_once_with("test", "new transcript")
+
+    def test_transcribe_recordings_skips_existing_transcript(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
+            id=1, name="test", label="Test", duration=10, created_at=datetime.now(), transcript="cached text"
+        )
+
+        result = ctrl.transcribe_recordings(["test"])
+
+        assert result["ok"] is True
+        assert result["counts"]["skipped_existing"] == 1
+        assert result["results"][0]["status"] == "skipped_existing"
+        mock_services["transcription_service"].transcribe.assert_not_called()
+
+    def test_transcribe_recordings_reports_failed_recording(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
+            id=1, name="test", label="Test", duration=10, created_at=datetime.now(), transcript=None
+        )
+        mock_services["local_repo"].exists.return_value = False
+
+        result = ctrl.transcribe_recordings(["test"])
+
+        assert result["ok"] is False
+        assert result["counts"]["failed"] == 1
+        assert result["results"][0]["status"] == "failed"
+
 
 class TestDashboardControllerSummary:
     def test_get_summary_found(self, mock_services):

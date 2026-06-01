@@ -6,6 +6,8 @@
 
 const API_URL = "/api/dashboard/recordings";
 const TRANSCRIBE_URL = "/api/dashboard/transcribe";
+const BULK_TRANSCRIBE_SELECTED_URL = "/api/dashboard/transcribe/selected";
+const BULK_TRANSCRIBE_UNTRANSCRIBED_URL = "/api/dashboard/transcribe/untranscribed";
 const TRANSCRIPT_URL = "/api/dashboard/transcript";
 const TRANSCRIPT_UPDATE_URL = "/api/dashboard/transcript";
 const PROMPTS_URL = "/api/dashboard/prompts";
@@ -606,7 +608,10 @@ function updateFilterCount(total, filtered) {
     const hasFilters = Boolean(
         _recordingFilters.query || _recordingFilters.date || _currentCollection !== null || _semanticResultNames !== null
     );
-    el.textContent = hasFilters ? `${filtered} of ${total}` : "";
+    const transcribed = _allRecordings.filter(rec => rec.has_transcript).length;
+    const untranscribed = _allRecordings.filter(rec => rec.in_db && rec.on_local && !rec.has_transcript).length;
+    const filterText = hasFilters ? `${filtered} of ${total} shown` : `${_allRecordings.length} total`;
+    el.textContent = `${filterText} · ${transcribed} transcribed · ${untranscribed} untranscribed`;
 }
 
 function updateBulkActionsBar() {
@@ -763,6 +768,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const askAiBulkBtn = $("#btn-bulk-ask-ai");
     const indexCollectionBtn = $("#btn-index-collection");
     const indexUnindexedBtn = $("#btn-index-unindexed");
+    const transcribeUntranscribedBtn = $("#btn-transcribe-untranscribed");
+    const bulkTranscribeBtn = $("#btn-bulk-transcribe");
     const askAiBackdrop = $("#ask-ai-modal-backdrop");
     const askAiClose = $("#ask-ai-modal-close");
     const askAiCancel = $("#ask-ai-modal-cancel");
@@ -866,6 +873,58 @@ document.addEventListener("DOMContentLoaded", () => {
             await loadDashboard();
         } catch (err) {
             showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Backfill indexing failed: ${escapeHtml(err.message)}`);
+        }
+    }
+
+    async function runBulkTranscription({ names = null, untranscribed = false, triggerBtn = null } = {}) {
+        if (!untranscribed && (!names || names.length === 0)) {
+            showDashboardAlert("alert-warning", '<i class="bi bi-info-circle me-1"></i>Select at least one recording first.');
+            return;
+        }
+
+        const endpoint = untranscribed ? BULK_TRANSCRIBE_UNTRANSCRIBED_URL : BULK_TRANSCRIBE_SELECTED_URL;
+        const payload = untranscribed ? { engine: "gemini" } : { names, engine: "gemini" };
+        const label = untranscribed ? "untranscribed recordings" : `${names.length} selected recording(s)`;
+
+        if (!window.confirm(`Transcribe ${label} with Gemini? Existing transcripts will be skipped.`)) {
+            return;
+        }
+
+        const originalHtml = triggerBtn ? triggerBtn.innerHTML : "";
+        if (triggerBtn) {
+            triggerBtn.disabled = true;
+            triggerBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Transcribing…';
+        }
+        showDashboardAlert("alert-info", '<span class="spinner-border spinner-border-sm me-1"></span>Transcribing recordings…');
+
+        try {
+            const res = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            const counts = data.counts || {};
+            const failed = counts.failed || 0;
+            const message = `Transcribed ${counts.transcribed || 0}; skipped ${counts.skipped_existing || 0}; failed ${failed}.`;
+
+            if (!res.ok || !data.ok) {
+                const detail = data.error || message || "Bulk transcription failed.";
+                showDashboardAlert(
+                    failed > 0 ? "alert-warning" : "alert-danger",
+                    `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(detail)} ${escapeHtml(message)}`
+                );
+            } else {
+                showDashboardAlert("alert-success", `<i class="bi bi-check-circle me-1"></i>${escapeHtml(message)}`);
+            }
+            await loadDashboard();
+        } catch (err) {
+            showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Bulk transcription failed: ${escapeHtml(err.message)}`);
+        } finally {
+            if (triggerBtn) {
+                triggerBtn.disabled = false;
+                triggerBtn.innerHTML = originalHtml;
+            }
         }
     }
 
@@ -1028,6 +1087,12 @@ document.addEventListener("DOMContentLoaded", () => {
         indexUnindexedBtn.addEventListener("click", (e) => {
             e.preventDefault();
             generateUnindexedEmbeddings();
+        });
+    }
+    if (transcribeUntranscribedBtn) {
+        transcribeUntranscribedBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            runBulkTranscription({ untranscribed: true, triggerBtn: transcribeUntranscribedBtn });
         });
     }
     if (askAiClose) askAiClose.addEventListener("click", closeAskAiModal);
@@ -1698,6 +1763,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const checked = document.querySelectorAll(".rec-checkbox:checked");
             const names = Array.from(checked).map(cb => cb.dataset.name);
             generateEmbeddings(names, false);
+        });
+    }
+
+    if (bulkTranscribeBtn) {
+        bulkTranscribeBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            runBulkTranscription({ names: selectedRecordingNames(), triggerBtn: bulkTranscribeBtn });
         });
     }
 

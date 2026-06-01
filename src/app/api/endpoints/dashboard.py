@@ -21,7 +21,7 @@ from models.dto.SemanticSearchRequestDTO import (
     SemanticSearchRequestDTO,
 )
 from models.dto.SummarizeRequestDTO import SummarizeRequestDTO
-from models.dto.TranscribeRequestDTO import TranscribeRequestDTO
+from models.dto.TranscribeRequestDTO import BulkTranscribeRequestDTO, TranscribeRequestDTO
 from models.dto.UpdateRecordingRequestDTO import UpdateRecordingRequestDTO
 from models.dto.UpdateSummaryRequestDTO import UpdateSummaryRequestDTO
 from models.dto.UpdateTaskRequestDTO import UpdateTaskRequestDTO
@@ -175,6 +175,29 @@ async def get_audio(
         raise HTTPException(status_code=404, detail="Audio file not found")
     mime = MIME_TYPES.get(file_ext, "audio/mpeg")
     return FileResponse(path, media_type=mime, filename=f"{name}.{file_ext}")
+
+
+@router.get("/transcribe/untranscribed")
+async def list_untranscribed_recordings(
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.list_untranscribed_recordings()
+
+
+@router.post("/transcribe/selected")
+async def transcribe_selected_recordings(
+    body: BulkTranscribeRequestDTO,
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.transcribe_recordings(body.names, engine=body.engine)
+
+
+@router.post("/transcribe/untranscribed")
+async def transcribe_untranscribed_recordings(
+    body: TranscribeRequestDTO = TranscribeRequestDTO(),
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.transcribe_untranscribed_recordings(engine=body.engine)
 
 
 @router.post("/transcribe/{name}")
