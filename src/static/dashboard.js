@@ -31,6 +31,8 @@ const COLLECTIONS_URL = "/api/dashboard/collections";
 const RECORDING_COLLECTIONS_URL = "/api/dashboard/recording";
 const SAVED_VIEWS_URL = "/api/dashboard/saved-views";
 const EMBEDDINGS_GENERATE_URL = "/api/dashboard/embeddings/generate";
+const EMBEDDINGS_COLLECTION_URL = "/api/dashboard/embeddings/generate/collection";
+const EMBEDDINGS_UNINDEXED_URL = "/api/dashboard/embeddings/generate/unindexed";
 const SEMANTIC_SEARCH_URL = "/api/dashboard/semantic-search";
 const ASK_RECORDINGS_URL = "/api/dashboard/ask";
 
@@ -759,6 +761,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const semanticSearchBtn = $("#semantic-search-btn");
     const askAiBtn = $("#btn-ask-ai");
     const askAiBulkBtn = $("#btn-bulk-ask-ai");
+    const indexCollectionBtn = $("#btn-index-collection");
+    const indexUnindexedBtn = $("#btn-index-unindexed");
     const askAiBackdrop = $("#ask-ai-modal-backdrop");
     const askAiClose = $("#ask-ai-modal-close");
     const askAiCancel = $("#ask-ai-modal-cancel");
@@ -808,6 +812,60 @@ document.addEventListener("DOMContentLoaded", () => {
             await loadDashboard();
         } catch (err) {
             showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Embedding generation failed: ${escapeHtml(err.message)}`);
+        }
+    }
+
+    async function generateCollectionEmbeddings(force = false) {
+        if (_currentCollection === null) {
+            showDashboardAlert("alert-warning", '<i class="bi bi-info-circle me-1"></i>Select a collection first.');
+            return;
+        }
+        showDashboardAlert("alert-info", '<span class="spinner-border spinner-border-sm me-1"></span>Indexing collection…');
+        try {
+            const res = await fetch(EMBEDDINGS_COLLECTION_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ collection_id: _currentCollection, force }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                const error = data.detail || data.error || "Collection indexing failed.";
+                showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(error)}`);
+                await loadDashboard();
+                return;
+            }
+            const counts = data.counts || {};
+            showDashboardAlert(
+                "alert-success",
+                `<i class="bi bi-check-circle me-1"></i>Indexed ${counts.indexed || 0}; skipped ${counts.skipped || 0}; failed ${counts.failed || 0}.`
+            );
+            await loadDashboard();
+        } catch (err) {
+            showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Collection indexing failed: ${escapeHtml(err.message)}`);
+        }
+    }
+
+    async function generateUnindexedEmbeddings() {
+        showDashboardAlert("alert-info", '<span class="spinner-border spinner-border-sm me-1"></span>Indexing unindexed recordings…');
+        try {
+            const res = await fetch(EMBEDDINGS_UNINDEXED_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ force: false }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                const error = data.detail || data.error || "Backfill indexing failed.";
+                showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(error)}`);
+                await loadDashboard();
+                return;
+            }
+            const counts = data.counts || {};
+            const message = data.message || `Indexed ${counts.indexed || 0}; skipped ${counts.skipped || 0}; failed ${counts.failed || 0}.`;
+            showDashboardAlert("alert-success", `<i class="bi bi-check-circle me-1"></i>${escapeHtml(message)}`);
+            await loadDashboard();
+        } catch (err) {
+            showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Backfill indexing failed: ${escapeHtml(err.message)}`);
         }
     }
 
@@ -960,6 +1018,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (askAiBtn) askAiBtn.addEventListener("click", (e) => { e.preventDefault(); openAskAiModal(); });
     if (askAiBulkBtn) askAiBulkBtn.addEventListener("click", (e) => { e.preventDefault(); openAskAiModal(selectedRecordingNames()); });
+    if (indexCollectionBtn) {
+        indexCollectionBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            generateCollectionEmbeddings(false);
+        });
+    }
+    if (indexUnindexedBtn) {
+        indexUnindexedBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            generateUnindexedEmbeddings();
+        });
+    }
     if (askAiClose) askAiClose.addEventListener("click", closeAskAiModal);
     if (askAiCancel) askAiCancel.addEventListener("click", closeAskAiModal);
     if (askAiBackdrop) askAiBackdrop.addEventListener("click", (e) => { if (e.target === askAiBackdrop) closeAskAiModal(); });

@@ -132,3 +132,46 @@ def test_embedding_failure_marks_status_and_redacts_key(semantic_db):
     assert "failed" in error.lower()
     assert "AIza" not in error
     assert "[redacted-api-key]" in error
+
+
+def test_index_collection_indexes_recordings_in_collection(semantic_db):
+    insert_recording(semantic_db, "alpha", transcript="Alpha transcript")
+    insert_recording(semantic_db, "beta", transcript="Beta transcript")
+    collection = semantic_db.create_collection("Strategy")
+    semantic_db.add_recording_to_collection("beta", collection["id"])
+    service = SemanticSearchService(semantic_db, FakeEmbeddingService())
+
+    result = service.index_collection(collection["id"])
+
+    assert result["ok"] is True
+    assert result["counts"]["indexed"] == 1
+    statuses = semantic_db.get_recording_embedding_status_map()
+    assert statuses["alpha"]["status"] == "not indexed"
+    assert statuses["beta"]["status"] == "indexed"
+
+
+def test_index_all_unindexed_backfills_only_unindexed_recordings(semantic_db):
+    insert_recording(semantic_db, "alpha", transcript="Alpha transcript")
+    insert_recording(semantic_db, "beta", transcript="Beta transcript")
+    service = SemanticSearchService(semantic_db, FakeEmbeddingService())
+    service.index_recordings(["alpha"])
+
+    result = service.index_all_unindexed()
+
+    assert result["ok"] is True
+    assert result["counts"]["indexed"] == 1
+    statuses = semantic_db.get_recording_embedding_status_map()
+    assert statuses["alpha"]["status"] == "indexed"
+    assert statuses["beta"]["status"] == "indexed"
+
+
+def test_index_all_unindexed_handles_no_work(semantic_db):
+    insert_recording(semantic_db, "alpha", transcript="Alpha transcript")
+    service = SemanticSearchService(semantic_db, FakeEmbeddingService())
+    service.index_recordings(["alpha"])
+
+    result = service.index_all_unindexed()
+
+    assert result["ok"] is True
+    assert result["message"] == "All recordings are already indexed."
+    assert result["counts"]["indexed"] == 0

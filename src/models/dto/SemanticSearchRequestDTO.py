@@ -6,6 +6,15 @@ class GenerateEmbeddingsRequestDTO(BaseModel):
     force: bool = False
 
 
+class GenerateCollectionEmbeddingsRequestDTO(BaseModel):
+    collection_id: int
+    force: bool = False
+
+
+class GenerateUnindexedEmbeddingsRequestDTO(BaseModel):
+    force: bool = False
+
+
 class SemanticSearchRequestDTO(BaseModel):
     query: str
     top_k: int = 10

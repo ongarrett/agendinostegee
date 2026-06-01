@@ -127,6 +127,28 @@ class SemanticSearchService:
             "results": results,
         }
 
+    def index_collection(self, collection_id: int, force: bool = False) -> dict:
+        names = self._sqlite_db_repository.get_recording_names_by_collection(collection_id)
+        if not names:
+            return {
+                "ok": False,
+                "error": "No recordings were found in that collection.",
+                "counts": {"indexed": 0, "skipped": 0, "failed": 0},
+                "results": [],
+            }
+        return self.index_recordings(names, force=force)
+
+    def index_all_unindexed(self, force: bool = False) -> dict:
+        names = self._sqlite_db_repository.get_unindexed_recording_names()
+        if not names:
+            return {
+                "ok": True,
+                "message": "All recordings are already indexed.",
+                "counts": {"indexed": 0, "skipped": 0, "failed": 0},
+                "results": [],
+            }
+        return self.index_recordings(names, force=force)
+
     def search(self, query: str, top_k: int = 10) -> dict:
         clean_query = (query or "").strip()
         if not clean_query:

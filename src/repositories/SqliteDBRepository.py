@@ -820,6 +820,37 @@ class SqliteDBRepository:
         finally:
             conn.close()
 
+    def get_recording_names_by_collection(self, collection_id: int) -> list[str]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT r.name
+                FROM recording_collection rc
+                JOIN recording r ON r.id = rc.recording_id
+                WHERE rc.collection_id = ?
+                ORDER BY r.name
+                """,
+                (collection_id,),
+            ).fetchall()
+            return [row["name"] for row in rows]
+        finally:
+            conn.close()
+
+    def get_unindexed_recording_names(self) -> list[str]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT r.name
+                FROM recording r
+                LEFT JOIN recording_embedding re ON re.recording_id = r.id
+                WHERE re.status IS NULL OR re.status != 'indexed'
+                ORDER BY r.name
+            """).fetchall()
+            return [row["name"] for row in rows]
+        finally:
+            conn.close()
+
     def save_recording_embedding(
         self,
         name: str,

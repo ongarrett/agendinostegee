@@ -381,3 +381,25 @@ class TestSqliteDBRepository:
         sources = db.get_recording_qa_sources(collection_id=collection["id"])
 
         assert [source["name"] for source in sources] == ["beta"]
+
+    def test_get_recording_names_by_collection(self, db):
+        rec_a = DBRecording(id=None, name="alpha", label="Alpha", duration=10, created_at=datetime.now())
+        rec_b = DBRecording(id=None, name="beta", label="Beta", duration=10, created_at=datetime.now())
+        db.insert_recording(rec_a)
+        db.insert_recording(rec_b)
+        collection = db.create_collection("Strategy")
+        db.add_recording_to_collection("beta", collection["id"])
+
+        assert db.get_recording_names_by_collection(collection["id"]) == ["beta"]
+
+    def test_get_unindexed_recording_names(self, db):
+        rec_a = DBRecording(id=None, name="alpha", label="Alpha", duration=10, created_at=datetime.now())
+        rec_b = DBRecording(id=None, name="beta", label="Beta", duration=10, created_at=datetime.now())
+        rec_c = DBRecording(id=None, name="gamma", label="Gamma", duration=10, created_at=datetime.now())
+        db.insert_recording(rec_a)
+        db.insert_recording(rec_b)
+        db.insert_recording(rec_c)
+        db.save_recording_embedding("alpha", status="indexed", model="fake", embedding=[1.0, 0.0])
+        db.save_recording_embedding("beta", status="failed", model="fake", error="No content")
+
+        assert db.get_unindexed_recording_names() == ["beta", "gamma"]

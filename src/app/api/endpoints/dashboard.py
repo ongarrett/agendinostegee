@@ -14,7 +14,9 @@ from models.dto.MoveRecordingRequestDTO import MoveRecordingRequestDTO, BulkMove
 from models.dto.PublishRequestDTO import PublishRequestDTO
 from models.dto.SavedViewRequestDTO import CreateSavedViewRequestDTO
 from models.dto.SemanticSearchRequestDTO import (
+    GenerateCollectionEmbeddingsRequestDTO,
     GenerateEmbeddingsRequestDTO,
+    GenerateUnindexedEmbeddingsRequestDTO,
     RecordingQARequestDTO,
     SemanticSearchRequestDTO,
 )
@@ -44,6 +46,22 @@ async def generate_embeddings(
     semantic_search_service: SemanticSearchService = Depends(depends.get_semantic_search_service),
 ):
     return semantic_search_service.index_recordings(body.names, force=body.force)
+
+
+@router.post("/embeddings/generate/collection")
+async def generate_collection_embeddings(
+    body: GenerateCollectionEmbeddingsRequestDTO,
+    semantic_search_service: SemanticSearchService = Depends(depends.get_semantic_search_service),
+):
+    return semantic_search_service.index_collection(body.collection_id, force=body.force)
+
+
+@router.post("/embeddings/generate/unindexed")
+async def generate_unindexed_embeddings(
+    body: GenerateUnindexedEmbeddingsRequestDTO,
+    semantic_search_service: SemanticSearchService = Depends(depends.get_semantic_search_service),
+):
+    return semantic_search_service.index_all_unindexed(force=body.force)
 
 
 @router.post("/semantic-search")

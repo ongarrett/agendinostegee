@@ -158,6 +158,14 @@
                                                         type="button" title="Ask AI about selected recordings or the active collection">
                                                     <i class="bi bi-chat-square-text me-1"></i>Ask AI
                                                 </button>
+                                                <button class="btn btn-sm btn-outline-secondary" id="btn-index-collection"
+                                                        type="button" title="Index recordings in the active collection">
+                                                    <i class="bi bi-collection me-1"></i>Index Collection
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-secondary" id="btn-index-unindexed"
+                                                        type="button" title="Index all recordings that are not indexed yet">
+                                                    <i class="bi bi-diagram-3 me-1"></i>Index Unindexed
+                                                </button>
                                                 <span id="recording-filter-count" class="small text-muted ms-auto"></span>
                                             </div>
                                             <div id="loading" class="text-center p-4">
@@ -681,5 +689,5 @@
 
 {% block extra_js %}
 <script src="/static/hidock-device.js?v=1"></script>
-    <script src="/static/dashboard.js?v=5"></script>
+    <script src="/static/dashboard.js?v=6"></script>
 {% endblock %}
