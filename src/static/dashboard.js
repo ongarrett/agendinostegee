@@ -12,6 +12,8 @@ const TRANSCRIPT_URL = "/api/dashboard/transcript";
 const TRANSCRIPT_UPDATE_URL = "/api/dashboard/transcript";
 const PROMPTS_URL = "/api/dashboard/prompts";
 const SUMMARIZE_URL = "/api/dashboard/summarize";
+const BULK_SUMMARIZE_SELECTED_URL = "/api/dashboard/summarize/selected";
+const BULK_SUMMARIZE_MISSING_URL = "/api/dashboard/summarize/missing";
 const SUMMARIES_URL = "/api/dashboard/summaries";
 const SHARE_DESTINATIONS_URL = "/api/dashboard/share/destinations";
 const SHARE_SUMMARY_URL = "/api/dashboard/share/summary";
@@ -610,8 +612,10 @@ function updateFilterCount(total, filtered) {
     );
     const transcribed = _allRecordings.filter(rec => rec.has_transcript).length;
     const untranscribed = _allRecordings.filter(rec => rec.in_db && rec.on_local && !rec.has_transcript).length;
+    const summarized = _allRecordings.filter(rec => rec.has_summary).length;
+    const missingSummaries = _allRecordings.filter(rec => rec.has_transcript && !rec.has_summary).length;
     const filterText = hasFilters ? `${filtered} of ${total} shown` : `${_allRecordings.length} total`;
-    el.textContent = `${filterText} · ${transcribed} transcribed · ${untranscribed} untranscribed`;
+    el.textContent = `${filterText} · ${transcribed} transcribed · ${untranscribed} untranscribed · ${summarized} summarized · ${missingSummaries} missing summaries`;
 }
 
 function updateBulkActionsBar() {
@@ -770,6 +774,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const indexUnindexedBtn = $("#btn-index-unindexed");
     const transcribeUntranscribedBtn = $("#btn-transcribe-untranscribed");
     const bulkTranscribeBtn = $("#btn-bulk-transcribe");
+    const summarizeMissingBtn = $("#btn-summarize-missing");
+    const bulkSummarizeBtn = $("#btn-bulk-summarize");
     const askAiBackdrop = $("#ask-ai-modal-backdrop");
     const askAiClose = $("#ask-ai-modal-close");
     const askAiCancel = $("#ask-ai-modal-cancel");
@@ -925,6 +931,44 @@ document.addEventListener("DOMContentLoaded", () => {
                 triggerBtn.disabled = false;
                 triggerBtn.innerHTML = originalHtml;
             }
+        }
+    }
+
+    async function runBulkSummarization({ promptId, names = null, missing = false } = {}) {
+        if (!missing && (!names || names.length === 0)) {
+            showDashboardAlert("alert-warning", '<i class="bi bi-info-circle me-1"></i>Select at least one recording first.');
+            return;
+        }
+
+        const endpoint = missing ? BULK_SUMMARIZE_MISSING_URL : BULK_SUMMARIZE_SELECTED_URL;
+        const payload = missing
+            ? { prompt_id: promptId, rate_limit_delay_seconds: 1, max_retries: 1 }
+            : { names, prompt_id: promptId, rate_limit_delay_seconds: 1, max_retries: 1 };
+
+        showDashboardAlert("alert-info", '<span class="spinner-border spinner-border-sm me-1"></span>Generating summaries…');
+        try {
+            const res = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            const counts = data.counts || {};
+            const failed = counts.failed || 0;
+            const message = `Summarized ${counts.summarized || 0}; skipped existing ${counts.skipped_existing || 0}; skipped without transcript ${counts.skipped_no_transcript || 0}; failed ${failed}.`;
+
+            if (!res.ok || !data.ok) {
+                const detail = data.error || message || "Bulk summarization failed.";
+                showDashboardAlert(
+                    failed > 0 ? "alert-warning" : "alert-danger",
+                    `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(detail)} ${escapeHtml(message)}`
+                );
+            } else {
+                showDashboardAlert("alert-success", `<i class="bi bi-check-circle me-1"></i>${escapeHtml(message)}`);
+            }
+            await loadDashboard();
+        } catch (err) {
+            showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Bulk summarization failed: ${escapeHtml(err.message)}`);
         }
     }
 
@@ -1093,6 +1137,12 @@ document.addEventListener("DOMContentLoaded", () => {
         transcribeUntranscribedBtn.addEventListener("click", (e) => {
             e.preventDefault();
             runBulkTranscription({ untranscribed: true, triggerBtn: transcribeUntranscribedBtn });
+        });
+    }
+    if (summarizeMissingBtn) {
+        summarizeMissingBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            openPromptPicker("recordings missing summaries", { mode: "missing" });
         });
     }
     if (askAiClose) askAiClose.addEventListener("click", closeAskAiModal);
@@ -1770,6 +1820,18 @@ document.addEventListener("DOMContentLoaded", () => {
         bulkTranscribeBtn.addEventListener("click", (e) => {
             e.preventDefault();
             runBulkTranscription({ names: selectedRecordingNames(), triggerBtn: bulkTranscribeBtn });
+        });
+    }
+
+    if (bulkSummarizeBtn) {
+        bulkSummarizeBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            const names = selectedRecordingNames();
+            if (names.length === 0) {
+                showDashboardAlert("alert-warning", '<i class="bi bi-info-circle me-1"></i>Select at least one recording first.');
+                return;
+            }
+            openPromptPicker(`${names.length} selected recording(s)`, { mode: "selected", names });
         });
     }
 
@@ -2975,6 +3037,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const promptLoading = $("#prompt-loading");
     const promptError = $("#prompt-picker-error");
     let currentSummarizeName = null;
+    let currentSummarizeMode = "single";
+    let currentSummarizeNames = [];
 
     function closePromptPicker() {
         hide(promptBackdrop);
@@ -2989,8 +3053,10 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    async function openPromptPicker(name) {
+    async function openPromptPicker(name, options = {}) {
         currentSummarizeName = name;
+        currentSummarizeMode = options.mode || "single";
+        currentSummarizeNames = options.names || [];
         promptName.textContent = name;
         show(promptLoading);
         hide(promptList);
@@ -3092,6 +3158,15 @@ document.addEventListener("DOMContentLoaded", () => {
         selectBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
 
         closePromptPicker();
+        if (currentSummarizeMode === "missing") {
+            await runBulkSummarization({ promptId, missing: true });
+            return;
+        }
+        if (currentSummarizeMode === "selected") {
+            await runBulkSummarization({ promptId, names: currentSummarizeNames });
+            return;
+        }
+
         openSummaryModal(currentSummarizeName);
         summaryLoading.querySelector("p").textContent = "Generating summary with Gemini AI… this may take a moment.";
 

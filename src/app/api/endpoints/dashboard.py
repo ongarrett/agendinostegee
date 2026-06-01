@@ -20,7 +20,7 @@ from models.dto.SemanticSearchRequestDTO import (
     RecordingQARequestDTO,
     SemanticSearchRequestDTO,
 )
-from models.dto.SummarizeRequestDTO import SummarizeRequestDTO
+from models.dto.SummarizeRequestDTO import BulkSummarizeRequestDTO, SummarizeRequestDTO
 from models.dto.TranscribeRequestDTO import BulkTranscribeRequestDTO, TranscribeRequestDTO
 from models.dto.UpdateRecordingRequestDTO import UpdateRecordingRequestDTO
 from models.dto.UpdateSummaryRequestDTO import UpdateSummaryRequestDTO
@@ -231,6 +231,38 @@ async def list_system_prompts(
     dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
 ):
     return dashboard_controller.list_system_prompts()
+
+
+@router.get("/summarize/missing")
+async def list_missing_summaries(
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.list_missing_summaries()
+
+
+@router.post("/summarize/selected")
+async def summarize_selected_recordings(
+    body: BulkSummarizeRequestDTO,
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.summarize_recordings(
+        body.names,
+        body.prompt_id,
+        rate_limit_delay_seconds=body.rate_limit_delay_seconds,
+        max_retries=body.max_retries,
+    )
+
+
+@router.post("/summarize/missing")
+async def summarize_missing_summaries(
+    body: BulkSummarizeRequestDTO,
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.summarize_missing_summaries(
+        body.prompt_id,
+        rate_limit_delay_seconds=body.rate_limit_delay_seconds,
+        max_retries=body.max_retries,
+    )
 
 
 @router.post("/summarize/{name}")

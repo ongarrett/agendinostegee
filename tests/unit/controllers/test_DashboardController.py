@@ -355,6 +355,102 @@ class TestDashboardControllerSummarizeRecording:
         assert result["ok"] is False
         assert "Summarization failed" in result["error"]
 
+    def test_list_missing_summaries_requires_transcript_and_no_summary(self, mock_services):
+        ctrl = mock_services["controller"]
+        missing = DBRecording(
+            id=1, name="missing", label="Missing", duration=10, created_at=datetime.now(), transcript="text"
+        )
+        summarized = DBRecording(
+            id=2,
+            name="summarized",
+            label="Summarized",
+            duration=10,
+            created_at=datetime.now(),
+            transcript="text",
+            summary="already summarized",
+        )
+        no_transcript = DBRecording(
+            id=3, name="no_transcript", label="No Transcript", duration=10, created_at=datetime.now(), transcript=None
+        )
+        mock_services["sqlite_db"].get_recordings.return_value = [missing, summarized, no_transcript]
+
+        result = ctrl.list_missing_summaries()
+
+        assert result["ok"] is True
+        assert result["count"] == 1
+        assert result["recordings"][0]["name"] == "missing"
+
+    def test_summarize_recordings_generates_missing_summary(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["system_prompts_repo"].get_prompt_content.return_value = "prompt"
+        mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
+            id=1, name="test", label="Test", duration=10, created_at=datetime.now(), transcript="text"
+        )
+        mock_services["sqlite_db"].get_transcript.return_value = "text"
+        mock_services["summarization_service"].summarize.return_value = {
+            "title": "Generated",
+            "tags": ["tag"],
+            "summary": "Summary",
+        }
+        mock_services["sqlite_db"].save_summarization_result.return_value = MagicMock(id=1, version=1)
+
+        result = ctrl.summarize_recordings(["test"], "prompt_id")
+
+        assert result["ok"] is True
+        assert result["counts"]["summarized"] == 1
+        assert result["results"][0]["status"] == "summarized"
+        mock_services["sqlite_db"].save_summarization_result.assert_called_once()
+
+    def test_summarize_recordings_skips_existing_summary(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["system_prompts_repo"].get_prompt_content.return_value = "prompt"
+        mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
+            id=1,
+            name="test",
+            label="Test",
+            duration=10,
+            created_at=datetime.now(),
+            transcript="text",
+            summary="already summarized",
+        )
+
+        result = ctrl.summarize_recordings(["test"], "prompt_id")
+
+        assert result["ok"] is True
+        assert result["counts"]["skipped_existing"] == 1
+        assert result["results"][0]["status"] == "skipped_existing"
+        mock_services["summarization_service"].summarize.assert_not_called()
+        mock_services["sqlite_db"].save_summarization_result.assert_not_called()
+
+    def test_summarize_recordings_continues_after_failure(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["system_prompts_repo"].get_prompt_content.return_value = "prompt"
+
+        def get_recording(name):
+            return DBRecording(
+                id=1,
+                name=name,
+                label=name,
+                duration=10,
+                created_at=datetime.now(),
+                transcript="text",
+            )
+
+        mock_services["sqlite_db"].get_recording_by_name.side_effect = get_recording
+        mock_services["sqlite_db"].get_transcript.return_value = "text"
+        mock_services["summarization_service"].summarize.side_effect = [
+            Exception("API error"),
+            {"title": "Generated", "tags": [], "summary": "Summary"},
+        ]
+        mock_services["sqlite_db"].save_summarization_result.return_value = MagicMock(id=1, version=1)
+
+        result = ctrl.summarize_recordings(["first", "second"], "prompt_id")
+
+        assert result["ok"] is False
+        assert result["counts"]["failed"] == 1
+        assert result["counts"]["summarized"] == 1
+        assert [item["status"] for item in result["results"]] == ["failed", "summarized"]
+
 
 class TestDashboardControllerMetadata:
     def test_update_metadata_success(self, mock_services):

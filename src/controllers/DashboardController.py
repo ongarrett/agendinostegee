@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime
 
 from fastapi import Request
@@ -509,6 +510,134 @@ class DashboardController:
             "title": title,
             "tags": tags,
         }
+
+    @staticmethod
+    def _has_saved_summary(db_rec) -> bool:
+        return db_rec is not None and db_rec.summary is not None
+
+    @staticmethod
+    def _is_transient_gemini_error(error: str) -> bool:
+        transient_markers = ("429", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "rate limit", "high demand")
+        return any(marker.lower() in (error or "").lower() for marker in transient_markers)
+
+    def list_missing_summaries(self) -> dict:
+        recordings = self._sqlite_db_repository.get_recordings()
+        missing = []
+        for rec in recordings:
+            if not self._has_saved_transcript(rec) or self._has_saved_summary(rec):
+                continue
+            missing.append(
+                {
+                    "name": rec.name,
+                    "label": rec.label,
+                    "file_extension": rec.file_extension,
+                    "recorded_at": rec.recorded_at,
+                }
+            )
+        return {"ok": True, "count": len(missing), "recordings": missing}
+
+    def summarize_recordings(
+        self,
+        names: list[str],
+        prompt_id: str,
+        rate_limit_delay_seconds: float = 0.0,
+        max_retries: int = 0,
+    ) -> dict:
+        unique_names = []
+        seen = set()
+        for name in names:
+            bare_name = self._bare_name(name)
+            if bare_name and bare_name not in seen:
+                unique_names.append(bare_name)
+                seen.add(bare_name)
+
+        if not unique_names:
+            return {"ok": False, "error": "No recordings selected"}
+
+        prompt_content = self._system_prompts_repository.get_prompt_content(prompt_id)
+        if not prompt_content:
+            return {"ok": False, "error": f"System prompt '{prompt_id}' not found"}
+
+        results = []
+        counts = {"summarized": 0, "skipped_existing": 0, "skipped_no_transcript": 0, "failed": 0}
+        delay_seconds = max(float(rate_limit_delay_seconds or 0), 0.0)
+        retries = max(int(max_retries or 0), 0)
+
+        for index, bare_name in enumerate(unique_names):
+            db_rec = self._sqlite_db_repository.get_recording_by_name(bare_name)
+            if db_rec is None:
+                counts["failed"] += 1
+                results.append({"name": bare_name, "status": "failed", "error": "Recording not found in database"})
+                continue
+
+            if not self._has_saved_transcript(db_rec):
+                counts["skipped_no_transcript"] += 1
+                results.append({"name": bare_name, "status": "skipped_no_transcript"})
+                continue
+
+            if self._has_saved_summary(db_rec):
+                counts["skipped_existing"] += 1
+                results.append({"name": bare_name, "status": "skipped_existing"})
+                continue
+
+            result = None
+            for attempt in range(retries + 1):
+                result = self.summarize_recording(bare_name, prompt_id)
+                if result.get("ok"):
+                    break
+                error = result.get("error", "")
+                if attempt >= retries or not self._is_transient_gemini_error(error):
+                    break
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
+
+            if result and result.get("ok"):
+                counts["summarized"] += 1
+                results.append(
+                    {
+                        "name": bare_name,
+                        "status": "summarized",
+                        "summary_id": result.get("summary_id"),
+                        "version": result.get("version"),
+                        "title": result.get("title"),
+                    }
+                )
+            else:
+                counts["failed"] += 1
+                results.append(
+                    {
+                        "name": bare_name,
+                        "status": "failed",
+                        "error": result.get("error", "Summarization failed") if result else "Summarization failed",
+                    }
+                )
+
+            if delay_seconds > 0 and index < len(unique_names) - 1:
+                time.sleep(delay_seconds)
+
+        return {"ok": counts["failed"] == 0, "counts": counts, "results": results}
+
+    def summarize_missing_summaries(
+        self,
+        prompt_id: str,
+        rate_limit_delay_seconds: float = 0.0,
+        max_retries: int = 0,
+    ) -> dict:
+        missing = self.list_missing_summaries()
+        names = [rec["name"] for rec in missing["recordings"]]
+        if not names:
+            return {
+                "ok": True,
+                "counts": {"summarized": 0, "skipped_existing": 0, "skipped_no_transcript": 0, "failed": 0},
+                "results": [],
+                "message": "No transcript-bearing recordings are missing summaries.",
+            }
+        return self.summarize_recordings(
+            names,
+            prompt_id,
+            rate_limit_delay_seconds=rate_limit_delay_seconds,
+            max_retries=max_retries,
+        )
 
     def get_summaries(self, name: str) -> dict:
         bare_name = self._bare_name(name)

@@ -170,6 +170,10 @@
                                                         type="button" title="Transcribe local recordings that do not have transcripts">
                                                     <i class="bi bi-mic me-1"></i>Transcribe Untranscribed
                                                 </button>
+                                                <button class="btn btn-sm btn-outline-warning" id="btn-summarize-missing"
+                                                        type="button" title="Generate summaries for recordings that have transcripts but no summaries">
+                                                    <i class="bi bi-stars me-1"></i>Generate Missing Summaries
+                                                </button>
                                                 <span id="recording-filter-count" class="small text-muted ms-auto"></span>
                                             </div>
                                             <div id="loading" class="text-center p-4">
@@ -210,6 +214,9 @@
                                                 </button>
                                                 <button class="btn btn-sm btn-outline-primary" id="btn-bulk-transcribe" title="Transcribe selected recordings without transcripts">
                                                     <i class="bi bi-mic me-1"></i>Transcribe Selected
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-warning" id="btn-bulk-summarize" title="Generate summaries for selected recordings without summaries">
+                                                    <i class="bi bi-stars me-1"></i>Generate Summary
                                                 </button>
                                                 <button class="btn btn-sm btn-outline-dark" id="btn-bulk-ask-ai" title="Ask AI about selected recordings">
                                                     <i class="bi bi-chat-square-text me-1"></i>Ask AI
