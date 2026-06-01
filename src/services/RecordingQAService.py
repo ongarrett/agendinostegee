@@ -139,7 +139,9 @@ class RecordingQAService:
         if not sources_with_context:
             return {
                 "ok": True,
-                "answer": "I do not have enough transcript or summary context in the selected recordings to answer that.",
+                "answer": (
+                    "I do not have enough transcript or summary context in the selected recordings to answer that."
+                ),
                 "citations": [],
                 "sources": [],
                 "retrieval": {
@@ -157,7 +159,10 @@ class RecordingQAService:
         except Exception as exc:
             return {
                 "ok": False,
-                "error": f"AI Q&A failed. Check GEMINI_API_KEY and GEMINI_MODEL, then try again. Details: {SemanticSearchService._safe_error(exc)}",
+                "error": (
+                    "AI Q&A failed. Check GEMINI_API_KEY and GEMINI_MODEL, then try again. "
+                    f"Details: {SemanticSearchService._safe_error(exc)}"
+                ),
                 "sources": source_refs,
             }
 
