@@ -705,3 +705,278 @@
     width: 30px;
     text-align: center;
 }
+
+.dashboard-mobile-sidebar-toggle,
+.recording-actions-mobile {
+    display: none;
+}
+
+.recording-actions-menu {
+    min-width: 13rem;
+}
+.recording-actions-menu.show {
+    display: block;
+}
+.recording-actions-menu .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: .15rem;
+    white-space: normal;
+}
+
+.mobile-sidebar-backdrop {
+    display: none;
+}
+
+@media (max-width: 991.98px) {
+    .folder-sidebar {
+        width: 200px;
+        min-width: 200px;
+    }
+
+    #recordings-table th:nth-child(6),
+    #recordings-table td:nth-child(6),
+    #recordings-table th:nth-child(7),
+    #recordings-table td:nth-child(7),
+    #recordings-table th:nth-child(8),
+    #recordings-table td:nth-child(8),
+    #recordings-table th:nth-child(9),
+    #recordings-table td:nth-child(9) {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .app-header .navbar-nav.ms-auto {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        justify-content: flex-end;
+        max-width: calc(100vw - 58px);
+    }
+    .app-header .navbar-nav.ms-auto .nav-link {
+        min-width: 40px;
+        min-height: 40px;
+        padding: .5rem .45rem;
+        font-size: 0;
+        text-align: center;
+    }
+    .app-header .navbar-nav.ms-auto .nav-link .bi {
+        font-size: 1rem;
+    }
+
+    .dashboard-mobile-sidebar-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 40px;
+        min-height: 40px;
+    }
+
+    .mobile-sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 9998;
+        background: rgba(0, 0, 0, .35);
+    }
+    .mobile-sidebar-backdrop:not(.d-none) {
+        display: block;
+    }
+
+    .folder-sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 9999;
+        width: min(82vw, 320px);
+        min-width: 0;
+        max-width: 320px;
+        transform: translateX(-105%);
+        transition: transform .18s ease;
+        overflow-y: auto;
+        box-shadow: var(--bs-box-shadow-lg);
+    }
+    .folder-sidebar.mobile-open {
+        transform: translateX(0);
+    }
+
+    .folder-tree {
+        max-height: 32vh;
+        overscroll-behavior: contain;
+    }
+    #collection-tree {
+        max-height: 38vh;
+    }
+    .folder-tree-item,
+    .collection-tree-item,
+    .saved-view-item {
+        min-height: 42px;
+        padding: .55rem .75rem;
+    }
+    .folder-tree-item .folder-name,
+    .collection-tree-item .collection-name,
+    .saved-view-item .saved-view-name {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        line-height: 1.25;
+    }
+
+    .recording-filters {
+        flex-direction: column;
+        align-items: stretch !important;
+    }
+    .recording-filters .input-group,
+    .recording-filters .btn {
+        width: 100%;
+        max-width: none !important;
+    }
+    .recording-filters .btn {
+        min-height: 42px;
+    }
+    #recording-filter-count {
+        margin-left: 0 !important;
+        line-height: 1.35;
+    }
+
+    .table-responsive {
+        overflow-x: visible;
+    }
+    #recordings-table {
+        table-layout: fixed;
+        width: 100%;
+    }
+    #recordings-table th,
+    #recordings-table td {
+        font-size: .82rem;
+        padding: .55rem .4rem;
+        vertical-align: middle;
+    }
+    #recordings-table th:nth-child(5),
+    #recordings-table td:nth-child(5),
+    #recordings-table th:nth-child(10),
+    #recordings-table td:nth-child(10),
+    #recordings-table th:nth-child(11),
+    #recordings-table td:nth-child(11) {
+        display: none;
+    }
+    #recordings-table th:first-child,
+    #recordings-table td:first-child {
+        width: 34px;
+    }
+    #recordings-table th:nth-child(2),
+    #recordings-table td:nth-child(2) {
+        width: 34%;
+        overflow-wrap: anywhere;
+    }
+    #recordings-table th:nth-child(3),
+    #recordings-table td:nth-child(3) {
+        width: 24%;
+    }
+    #recordings-table th:nth-child(4),
+    #recordings-table td:nth-child(4) {
+        width: 14%;
+    }
+    #recordings-table th:nth-child(12),
+    #recordings-table td:nth-child(12) {
+        width: 24%;
+    }
+    #recordings-table th:nth-child(13),
+    #recordings-table td:nth-child(13) {
+        width: 48px;
+    }
+    #recordings-table .rec-checkbox {
+        width: 22px;
+        height: 22px;
+    }
+
+    .recording-actions-desktop {
+        display: none;
+    }
+    .recording-actions-mobile {
+        display: inline-block;
+        position: relative;
+    }
+    .recording-actions-toggle {
+        min-width: 42px;
+        min-height: 42px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .recording-actions-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        z-index: 1060;
+        max-width: min(78vw, 260px);
+        box-shadow: var(--bs-box-shadow);
+    }
+    .recording-actions-menu .dropdown-item {
+        min-height: 44px;
+        padding: .65rem .9rem;
+    }
+
+    .bulk-actions-bar {
+        flex-wrap: wrap;
+        gap: .4rem;
+        padding: .75rem;
+    }
+    .bulk-actions-bar .btn {
+        min-height: 42px;
+    }
+
+    .transcript-modal-backdrop {
+        align-items: stretch;
+        justify-content: stretch;
+        padding: .5rem;
+    }
+    .transcript-modal {
+        width: 100%;
+        max-width: none !important;
+        max-height: calc(100vh - 1rem);
+        border-radius: var(--bs-border-radius);
+    }
+    .transcript-modal-header {
+        padding: .85rem 1rem;
+        gap: .75rem;
+    }
+    .transcript-modal-header h5 {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        font-size: 1rem;
+    }
+    .transcript-modal-body {
+        padding: 1rem;
+        font-size: .95rem;
+        line-height: 1.65;
+    }
+    #ask-ai-answer-text,
+    #ask-ai-sources,
+    #ask-ai-retrieval-note,
+    .summary-content,
+    .recording-detail-section-body,
+    .recording-detail-transcript {
+        overflow-wrap: anywhere;
+        word-break: normal;
+    }
+    #ask-ai-sources .badge {
+        white-space: normal;
+        text-align: left;
+        line-height: 1.35;
+        max-width: 100%;
+    }
+
+    .recording-detail-actions {
+        flex-wrap: wrap;
+    }
+    .recording-detail-actions .btn,
+    .recording-detail-section summary {
+        min-height: 42px;
+    }
+    .recording-detail-audio audio {
+        width: 100%;
+    }
+    .recording-detail-transcript {
+        max-height: none;
+    }
+}
