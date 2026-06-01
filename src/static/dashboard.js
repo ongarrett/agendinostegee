@@ -109,11 +109,20 @@ function renderEmbeddingStatus(status, error) {
 
 function actionButtons(rec) {
     const btns = [];
+    const mobileItems = [];
+    const item = (classes, attrs, icon, label) => {
+        mobileItems.push(
+            `<button class="dropdown-item ${classes}" type="button" ${attrs}><i class="bi ${icon} me-2"></i>${label}</button>`
+        );
+    };
+
     if (rec.on_local || rec.in_db) {
         btns.push(`<button class="btn btn-sm btn-outline-dark btn-view-detail" data-name="${rec.name}" title="Open recording details"><i class="bi bi-layout-text-sidebar-reverse"></i></button>`);
+        item("btn-view-detail", `data-name="${rec.name}"`, "bi-layout-text-sidebar-reverse", "Details");
     }
     if (rec.on_local) {
         btns.push(`<button class="btn btn-sm btn-outline-secondary btn-play-audio" data-name="${rec.name}" title="Play audio"><i class="bi bi-play-circle"></i></button>`);
+        item("btn-play-audio", `data-name="${rec.name}"`, "bi-play-circle", "Play audio");
         if (!rec.has_transcript) {
             btns.push(`<div class="btn-group btn-group-sm transcribe-split" style="position:relative">
                 <button class="btn btn-outline-primary btn-transcribe" data-name="${rec.name}" data-engine="gemini" title="Transcribe with Gemini"><i class="bi bi-mic"></i></button>
@@ -123,24 +132,55 @@ function actionButtons(rec) {
                     <a href="#" class="btn-transcribe-engine d-flex align-items-center gap-2 px-3 py-2 text-decoration-none text-body" data-name="${rec.name}" data-engine="whisper" style="font-size:.85rem;border-top:1px solid var(--bs-border-color)"><i class="bi bi-pc-display"></i> Whisper (local)</a>
                 </div>
             </div>`);
+            item("btn-transcribe", `data-name="${rec.name}" data-engine="gemini"`, "bi-cloud", "Transcribe with Gemini");
+            item("btn-transcribe", `data-name="${rec.name}" data-engine="whisper"`, "bi-pc-display", "Transcribe with Whisper");
         }
     }
     if (rec.has_transcript) {
         btns.push(`<button class="btn btn-sm btn-outline-success btn-view-transcript" data-name="${rec.name}" title="View transcript"><i class="bi bi-file-text"></i></button>`);
         btns.push(`<button class="btn btn-sm btn-outline-warning btn-summarize" data-name="${rec.name}" title="Summarize"><i class="bi bi-stars"></i></button>`);
+        item("btn-view-transcript", `data-name="${rec.name}"`, "bi-file-text", "Transcript");
+        item("btn-summarize", `data-name="${rec.name}"`, "bi-stars", "Summarize");
     }
     if (rec.has_summary) {
         btns.push(`<button class="btn btn-sm btn-outline-info btn-view-summary" data-name="${rec.name}" title="View summaries"><i class="bi bi-journal-text"></i></button>`);
+        item("btn-view-summary", `data-name="${rec.name}"`, "bi-journal-text", "Summary");
     }
     if (rec.in_db) {
         btns.push(`<button class="btn btn-sm btn-outline-primary btn-move-recording" data-name="${rec.name}" title="Move to folder"><i class="bi bi-folder-symlink"></i></button>`);
         btns.push(`<button class="btn btn-sm btn-outline-primary btn-manage-collections" data-name="${rec.name}" title="Add to collection"><i class="bi bi-collection"></i></button>`);
         btns.push(`<button class="btn btn-sm btn-outline-secondary btn-index-recording" data-name="${rec.name}" data-force="${rec.embedding_status === "indexed" ? "true" : "false"}" title="${rec.embedding_status === "indexed" ? "Regenerate embedding" : "Generate embedding"}"><i class="bi bi-diagram-3"></i></button>`);
+        item("btn-move-recording", `data-name="${rec.name}"`, "bi-folder-symlink", "Move");
+        item("btn-manage-collections", `data-name="${rec.name}"`, "bi-collection", "Collections");
+        item(
+            "btn-index-recording",
+            `data-name="${rec.name}" data-force="${rec.embedding_status === "indexed" ? "true" : "false"}"`,
+            "bi-diagram-3",
+            rec.embedding_status === "indexed" ? "Regenerate embedding" : "Generate embedding"
+        );
     }
     if (rec.on_device || rec.on_local || rec.in_db) {
         btns.push(`<button class="btn btn-sm btn-outline-danger btn-delete-recording" data-name="${rec.name}" data-on-device="${rec.on_device}" data-on-local="${rec.on_local}" data-in-db="${rec.in_db}" title="Delete recording…"><i class="bi bi-trash3"></i></button>`);
+        item(
+            "btn-delete-recording text-danger",
+            `data-name="${rec.name}" data-on-device="${rec.on_device}" data-on-local="${rec.on_local}" data-in-db="${rec.in_db}"`,
+            "bi-trash3",
+            "Delete"
+        );
     }
-    return btns.join(" ") || '<span class="text-muted">-</span>';
+
+    const desktopActions = btns.join(" ") || '<span class="text-muted">-</span>';
+    const mobileActions = mobileItems.length
+        ? `<div class="dropdown recording-actions-mobile">
+            <button class="btn btn-sm btn-outline-secondary recording-actions-toggle" type="button" aria-expanded="false" title="Recording actions">
+                <i class="bi bi-three-dots"></i>
+            </button>
+            <div class="dropdown-menu dropdown-menu-end recording-actions-menu">
+                ${mobileItems.join("")}
+            </div>
+        </div>`
+        : '<span class="text-muted">-</span>';
+    return `<div class="recording-actions-desktop">${desktopActions}</div>${mobileActions}`;
 }
 
 function renderTags(tags) {
@@ -776,6 +816,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const bulkTranscribeBtn = $("#btn-bulk-transcribe");
     const summarizeMissingBtn = $("#btn-summarize-missing");
     const bulkSummarizeBtn = $("#btn-bulk-summarize");
+    const mobileSidebarBtn = $("#btn-mobile-sidebar");
+    const mobileSidebarBackdrop = $("#mobile-sidebar-backdrop");
+    const folderSidebar = $("#folder-sidebar");
     const askAiBackdrop = $("#ask-ai-modal-backdrop");
     const askAiClose = $("#ask-ai-modal-close");
     const askAiCancel = $("#ask-ai-modal-cancel");
@@ -797,6 +840,67 @@ document.addEventListener("DOMContentLoaded", () => {
         alert.innerHTML = message;
         show(alert);
     }
+
+    function closeMobileSidebar() {
+        folderSidebar?.classList.remove("mobile-open");
+        mobileSidebarBtn?.setAttribute("aria-expanded", "false");
+        hide(mobileSidebarBackdrop);
+    }
+
+    function openMobileSidebar() {
+        folderSidebar?.classList.add("mobile-open");
+        mobileSidebarBtn?.setAttribute("aria-expanded", "true");
+        show(mobileSidebarBackdrop);
+    }
+
+    function closeRecordingActionMenus(exceptMenu = null) {
+        document.querySelectorAll(".recording-actions-menu.show").forEach(menu => {
+            if (menu !== exceptMenu) {
+                menu.classList.remove("show");
+                menu.closest(".recording-actions-mobile")
+                    ?.querySelector(".recording-actions-toggle")
+                    ?.setAttribute("aria-expanded", "false");
+            }
+        });
+    }
+
+    if (mobileSidebarBtn) {
+        mobileSidebarBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            if (folderSidebar?.classList.contains("mobile-open")) {
+                closeMobileSidebar();
+            } else {
+                openMobileSidebar();
+            }
+        });
+    }
+    if (mobileSidebarBackdrop) {
+        mobileSidebarBackdrop.addEventListener("click", closeMobileSidebar);
+    }
+
+    document.addEventListener("click", (e) => {
+        const toggle = e.target.closest(".recording-actions-toggle");
+        if (toggle) {
+            e.preventDefault();
+            e.stopPropagation();
+            const menu = toggle.closest(".recording-actions-mobile")?.querySelector(".recording-actions-menu");
+            if (!menu) return;
+            const willOpen = !menu.classList.contains("show");
+            closeRecordingActionMenus(menu);
+            menu.classList.toggle("show", willOpen);
+            toggle.setAttribute("aria-expanded", willOpen ? "true" : "false");
+            return;
+        }
+
+        if (e.target.closest(".recording-actions-menu .dropdown-item")) {
+            closeRecordingActionMenus();
+            return;
+        }
+
+        if (!e.target.closest(".recording-actions-mobile")) {
+            closeRecordingActionMenus();
+        }
+    });
 
     async function generateEmbeddings(names, force = false) {
         if (!names || names.length === 0) {
@@ -1217,6 +1321,7 @@ document.addEventListener("DOMContentLoaded", () => {
             _currentFolder = path === "null" ? null : path;
             renderFolderTree(_allFolders, _allRecordings);
             renderFilteredTable();
+            closeMobileSidebar();
             return;
         }
 
@@ -1228,6 +1333,7 @@ document.addEventListener("DOMContentLoaded", () => {
             _currentCollection = id ? Number(id) : null;
             renderCollectionTree(_allCollections, _allRecordings);
             renderFilteredTable();
+            closeMobileSidebar();
             return;
         }
 
@@ -1477,6 +1583,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const id = Number(savedViewItem.dataset.savedViewId);
             const view = _allSavedViews.find(savedView => Number(savedView.id) === id);
             if (view) applySavedView(view);
+            closeMobileSidebar();
         }
     });
 

@@ -103,10 +103,20 @@
                                         <i class="bi bi-mic me-1"></i> Recordings
                                     </h3>
                                     <div class="d-flex gap-2 align-items-center">
+                                        <button class="btn btn-sm btn-outline-secondary dashboard-mobile-sidebar-toggle"
+                                                id="btn-mobile-sidebar"
+                                                type="button"
+                                                aria-controls="folder-sidebar"
+                                                aria-expanded="false"
+                                                title="Show folders and collections">
+                                            <i class="bi bi-list"></i>
+                                            <span class="visually-hidden">Show folders and collections</span>
+                                        </button>
                                         <span id="folder-breadcrumb" class="text-muted small"></span>
                                     </div>
                                 </div>
                                 <div class="card-body p-0">
+                                    <div id="mobile-sidebar-backdrop" class="mobile-sidebar-backdrop d-none"></div>
                                     <div class="row g-0">
                                         <!-- Folder tree sidebar -->
                                         <div class="col-auto folder-sidebar" id="folder-sidebar">
