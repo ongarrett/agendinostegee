@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOST="0.0.0.0"
+PORT="8000"
+
+TAILSCALE_IP=""
+if command -v tailscale >/dev/null 2>&1; then
+    TAILSCALE_IP="$(tailscale ip -4 2>/dev/null | grep -E '^[0-9]+(\.[0-9]+){3}$' | head -n 1 || true)"
+fi
+
+FASTAPI_BIN="fastapi"
+if [[ -x "${ROOT_DIR}/.venv/bin/fastapi" ]]; then
+    FASTAPI_BIN="${ROOT_DIR}/.venv/bin/fastapi"
+fi
+
+cat <<EOF
+AgenDino tailnet server
+
+This starts AgenDino on ${HOST}:${PORT} for private access from devices on your Tailscale network.
+
+Keep Tailscale running on this Mac and on the device you want to use.
+Open AgenDino from another tailnet device at:
+EOF
+
+if [[ -n "${TAILSCALE_IP}" ]]; then
+    echo "  http://${TAILSCALE_IP}:${PORT}"
+else
+    echo "  http://<tailscale-ip>:${PORT}"
+    echo
+    echo "Tip: install or start Tailscale, then run: tailscale ip -4"
+fi
+
+cat <<EOF
+
+This helper does not enable Tailscale Funnel and does not publish AgenDino to the public internet.
+Press Ctrl+C to stop the server.
+
+Starting FastAPI...
+EOF
+
+cd "${ROOT_DIR}/src"
+exec "${FASTAPI_BIN}" dev main.py --host "${HOST}" --port "${PORT}"

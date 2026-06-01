@@ -50,6 +50,28 @@ Open **http://127.0.0.1:8000** in your browser.
 
 → Full setup guide: [Getting Started](docs/getting-started.md)
 
+## Private Remote Access With Tailscale
+
+To use AgenDino from another device on your private Tailscale network, keep Tailscale running on this Mac and on the other device, then run:
+
+```bash
+make serve-tailnet
+```
+
+Or run the helper directly:
+
+```bash
+./scripts/serve-tailnet
+```
+
+The helper starts the same FastAPI app on `0.0.0.0:8000` so tailnet devices can reach it. If the Tailscale CLI is available, it prints this Mac's Tailscale IP and the URL to open:
+
+```text
+http://<tailscale-ip>:8000
+```
+
+This is intended for private tailnet access only. It does not enable Tailscale Funnel and does not publish AgenDino to the public internet. Stop the server with `Ctrl+C`.
+
 ## Documentation
 
 Browse the full documentation at **[docs/index.md](docs/index.md)**.
