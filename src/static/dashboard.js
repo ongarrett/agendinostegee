@@ -32,6 +32,7 @@ const RECORDING_COLLECTIONS_URL = "/api/dashboard/recording";
 const SAVED_VIEWS_URL = "/api/dashboard/saved-views";
 const EMBEDDINGS_GENERATE_URL = "/api/dashboard/embeddings/generate";
 const SEMANTIC_SEARCH_URL = "/api/dashboard/semantic-search";
+const ASK_RECORDINGS_URL = "/api/dashboard/ask";
 
 const show = (el) => el?.classList.remove("d-none");
 const hide = (el) => el?.classList.add("d-none");
@@ -148,6 +149,14 @@ function renderCollectionBadges(collections) {
     return collections
         .map(c => `<span class="badge bg-primary bg-opacity-10 text-primary-emphasis me-1 mb-1">${escapeHtml(c.name)}</span>`)
         .join("");
+}
+
+function renderPlainText(text) {
+    return escapeHtml(text || "").replace(/\n/g, "<br>");
+}
+
+function selectedRecordingNames() {
+    return Array.from(document.querySelectorAll(".rec-checkbox:checked")).map(cb => cb.dataset.name);
 }
 
 function findRecording(name) {
@@ -748,6 +757,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const recordingFilterClear = $("#recording-filter-clear");
     const semanticSearchInput = $("#semantic-search-input");
     const semanticSearchBtn = $("#semantic-search-btn");
+    const askAiBtn = $("#btn-ask-ai");
+    const askAiBulkBtn = $("#btn-bulk-ask-ai");
+    const askAiBackdrop = $("#ask-ai-modal-backdrop");
+    const askAiClose = $("#ask-ai-modal-close");
+    const askAiCancel = $("#ask-ai-modal-cancel");
+    const askAiSubmit = $("#ask-ai-submit-btn");
+    const askAiQuestionInput = $("#ask-ai-question-input");
+    const askAiScope = $("#ask-ai-scope");
+    const askAiLoading = $("#ask-ai-loading");
+    const askAiError = $("#ask-ai-error");
+    const askAiAnswer = $("#ask-ai-answer");
+    const askAiAnswerText = $("#ask-ai-answer-text");
+    const askAiSources = $("#ask-ai-sources");
+    const askAiRetrievalNote = $("#ask-ai-retrieval-note");
+    let _askAiScope = { names: [], collectionId: null };
 
     function showDashboardAlert(className, message) {
         const alert = $("#sync-alert");
@@ -828,6 +852,125 @@ document.addEventListener("DOMContentLoaded", () => {
                 semanticSearchBtn.innerHTML = "Search";
             }
         }
+    }
+
+    function resetAskAiModal() {
+        if (askAiQuestionInput) askAiQuestionInput.value = "";
+        hide(askAiLoading);
+        hide(askAiError);
+        hide(askAiAnswer);
+        if (askAiAnswerText) askAiAnswerText.innerHTML = "";
+        if (askAiSources) askAiSources.innerHTML = "";
+        if (askAiRetrievalNote) askAiRetrievalNote.textContent = "";
+        if (askAiSubmit) askAiSubmit.disabled = false;
+    }
+
+    function openAskAiModal(names = null) {
+        resetAskAiModal();
+        const selectedNames = names || selectedRecordingNames();
+        if (selectedNames.length > 0) {
+            _askAiScope = { names: selectedNames, collectionId: null };
+            askAiScope.innerHTML = `<i class="bi bi-check2-square me-1"></i>Scope: ${selectedNames.length} selected recording(s).`;
+        } else if (_currentCollection !== null) {
+            _askAiScope = { names: [], collectionId: _currentCollection };
+            askAiScope.innerHTML = `<i class="bi bi-collection me-1"></i>Scope: collection <strong>${escapeHtml(currentCollectionName() || "Selected collection")}</strong>.`;
+        } else {
+            _askAiScope = { names: [], collectionId: null };
+            askAiScope.innerHTML = '<i class="bi bi-info-circle me-1"></i>Scope: select recordings or choose a collection first.';
+            askAiError.textContent = "Select one or more recordings, or click a collection before asking AI.";
+            show(askAiError);
+        }
+        show(askAiBackdrop);
+        askAiQuestionInput?.focus();
+    }
+
+    function closeAskAiModal() {
+        hide(askAiBackdrop);
+    }
+
+    function renderAskAiSources(data) {
+        const citations = data.citations || [];
+        const sources = citations.length > 0 ? citations : (data.sources || []);
+        if (!sources.length) {
+            askAiSources.innerHTML = '<span class="text-muted">No source recordings were cited.</span>';
+            return;
+        }
+        askAiSources.innerHTML = sources.map(source => {
+            const label = source.title || source.recording_name;
+            return `<span class="badge bg-secondary-subtle text-secondary-emphasis me-1 mb-1">
+                [${source.source_id}] ${escapeHtml(label)}
+            </span>`;
+        }).join("");
+    }
+
+    async function submitAskAiQuestion() {
+        const question = (askAiQuestionInput?.value || "").trim();
+        if (!question) {
+            askAiError.textContent = "Enter a question first.";
+            show(askAiError);
+            return;
+        }
+        if (!_askAiScope.names.length && _askAiScope.collectionId === null) {
+            askAiError.textContent = "Select recordings or choose a collection before asking AI.";
+            show(askAiError);
+            return;
+        }
+
+        hide(askAiError);
+        hide(askAiAnswer);
+        show(askAiLoading);
+        askAiSubmit.disabled = true;
+        askAiSubmit.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        try {
+            const res = await fetch(ASK_RECORDINGS_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    question,
+                    names: _askAiScope.names,
+                    collection_id: _askAiScope.collectionId,
+                    top_k: 6,
+                }),
+            });
+            const data = await res.json();
+            hide(askAiLoading);
+            if (!res.ok || !data.ok) {
+                const error = data.detail || data.error || "AI Q&A failed.";
+                askAiError.textContent = error;
+                show(askAiError);
+                return;
+            }
+            askAiAnswerText.innerHTML = renderPlainText(data.answer || "");
+            renderAskAiSources(data);
+            const retrieval = data.retrieval || {};
+            askAiRetrievalNote.textContent = retrieval.message
+                ? `${retrieval.mode || "retrieval"}: ${retrieval.message}`
+                : `Retrieval: ${retrieval.mode || "selected sources"}`;
+            show(askAiAnswer);
+        } catch (err) {
+            hide(askAiLoading);
+            askAiError.textContent = `AI Q&A failed: ${err.message}`;
+            show(askAiError);
+        } finally {
+            askAiSubmit.disabled = false;
+            askAiSubmit.innerHTML = '<i class="bi bi-send me-1"></i>Ask';
+        }
+    }
+
+    if (askAiBtn) askAiBtn.addEventListener("click", (e) => { e.preventDefault(); openAskAiModal(); });
+    if (askAiBulkBtn) askAiBulkBtn.addEventListener("click", (e) => { e.preventDefault(); openAskAiModal(selectedRecordingNames()); });
+    if (askAiClose) askAiClose.addEventListener("click", closeAskAiModal);
+    if (askAiCancel) askAiCancel.addEventListener("click", closeAskAiModal);
+    if (askAiBackdrop) askAiBackdrop.addEventListener("click", (e) => { if (e.target === askAiBackdrop) closeAskAiModal(); });
+    if (askAiSubmit) askAiSubmit.addEventListener("click", submitAskAiQuestion);
+    if (askAiQuestionInput) {
+        askAiQuestionInput.addEventListener("keydown", (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                submitAskAiQuestion();
+            }
+        });
     }
 
     if (recordingSearchInput) {

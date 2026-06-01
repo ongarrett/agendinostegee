@@ -25,6 +25,8 @@ from services.BulkImportService import BulkImportService
 from services.ICalSyncService import ICalSyncService
 from services.ProactorService import ProactorService
 from services.GeminiEmbeddingService import GeminiEmbeddingService
+from services.GeminiQAService import GeminiQAService
+from services.RecordingQAService import RecordingQAService
 from services.SemanticSearchService import SemanticSearchService
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -224,6 +226,22 @@ def get_semantic_search_service() -> SemanticSearchService:
         embedding_service=GeminiEmbeddingService(
             api_key=api_key,
             model=_config["GEMINI_EMBEDDING_MODEL"],
+        ),
+    )
+
+
+def get_recording_qa_service() -> RecordingQAService:
+    _config = get_config()
+    api_key = get_gemini_api_key()
+    return RecordingQAService(
+        sqlite_db_repository=get_sqlite_db_repository(),
+        embedding_service=GeminiEmbeddingService(
+            api_key=api_key,
+            model=_config["GEMINI_EMBEDDING_MODEL"],
+        ),
+        qa_service=GeminiQAService(
+            api_key=api_key,
+            model=_config["GEMINI_MODEL"],
         ),
     )
 

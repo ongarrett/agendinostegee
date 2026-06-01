@@ -85,3 +85,19 @@ def test_semantic_search_endpoint_returns_clear_missing_key_error():
     detail = response.json()["detail"]
     assert "GEMINI_API_KEY is missing or invalid" in detail
     assert "key value was not logged" in detail.lower()
+
+
+def test_recording_qa_endpoint_returns_clear_missing_key_error():
+    app = FastAPI()
+    app.include_router(dashboard.router, prefix="/api/dashboard")
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/dashboard/ask",
+        json={"question": "What happened?", "names": ["alpha"]},
+    )
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "GEMINI_API_KEY is missing or invalid" in detail
+    assert "key value was not logged" in detail.lower()

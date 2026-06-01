@@ -13,7 +13,11 @@ from models.dto.GenerateTasksRequestDTO import GenerateTasksRequestDTO
 from models.dto.MoveRecordingRequestDTO import MoveRecordingRequestDTO, BulkMoveRecordingsRequestDTO
 from models.dto.PublishRequestDTO import PublishRequestDTO
 from models.dto.SavedViewRequestDTO import CreateSavedViewRequestDTO
-from models.dto.SemanticSearchRequestDTO import GenerateEmbeddingsRequestDTO, SemanticSearchRequestDTO
+from models.dto.SemanticSearchRequestDTO import (
+    GenerateEmbeddingsRequestDTO,
+    RecordingQARequestDTO,
+    SemanticSearchRequestDTO,
+)
 from models.dto.SummarizeRequestDTO import SummarizeRequestDTO
 from models.dto.TranscribeRequestDTO import TranscribeRequestDTO
 from models.dto.UpdateRecordingRequestDTO import UpdateRecordingRequestDTO
@@ -21,6 +25,7 @@ from models.dto.UpdateSummaryRequestDTO import UpdateSummaryRequestDTO
 from models.dto.UpdateTaskRequestDTO import UpdateTaskRequestDTO
 from models.dto.UpdateTranscriptRequestDTO import UpdateTranscriptRequestDTO
 from services.BulkImportService import BulkImportService
+from services.RecordingQAService import RecordingQAService
 from services.SemanticSearchService import SemanticSearchService
 
 router = APIRouter()
@@ -47,6 +52,19 @@ async def semantic_search(
     semantic_search_service: SemanticSearchService = Depends(depends.get_semantic_search_service),
 ):
     return semantic_search_service.search(body.query, top_k=body.top_k)
+
+
+@router.post("/ask")
+async def ask_recordings(
+    body: RecordingQARequestDTO,
+    recording_qa_service: RecordingQAService = Depends(depends.get_recording_qa_service),
+):
+    return recording_qa_service.ask(
+        question=body.question,
+        names=body.names,
+        collection_id=body.collection_id,
+        top_k=body.top_k,
+    )
 
 
 @router.post("/upload")

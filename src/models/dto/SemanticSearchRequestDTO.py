@@ -9,3 +9,10 @@ class GenerateEmbeddingsRequestDTO(BaseModel):
 class SemanticSearchRequestDTO(BaseModel):
     query: str
     top_k: int = 10
+
+
+class RecordingQARequestDTO(BaseModel):
+    question: str
+    names: list[str] = []
+    collection_id: int | None = None
+    top_k: int = 6
