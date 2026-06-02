@@ -127,20 +127,24 @@
                                                 </button>
                                             </div>
                                             <div id="folder-tree" class="folder-tree"></div>
-                                            <div class="folder-sidebar-header d-flex justify-content-between align-items-center border-top">
+                                            <div class="folder-sidebar-header d-flex justify-content-between align-items-center border-top mobile-section-toggle"
+                                                 data-mobile-section-target="collection-tree"
+                                                 aria-expanded="false">
                                                 <span class="fw-semibold small"><i class="bi bi-collection me-1"></i>Collections</span>
                                                 <button class="btn btn-sm btn-outline-primary" id="btn-create-collection" title="New collection">
                                                     <i class="bi bi-plus-lg"></i>
                                                 </button>
                                             </div>
-                                            <div id="collection-tree" class="folder-tree"></div>
-                                            <div class="folder-sidebar-header d-flex justify-content-between align-items-center border-top">
+                                            <div id="collection-tree" class="folder-tree mobile-collapsible mobile-collapsed"></div>
+                                            <div class="folder-sidebar-header d-flex justify-content-between align-items-center border-top mobile-section-toggle"
+                                                 data-mobile-section-target="saved-view-list"
+                                                 aria-expanded="false">
                                                 <span class="fw-semibold small"><i class="bi bi-bookmark-star me-1"></i>Saved Views</span>
                                                 <button class="btn btn-sm btn-outline-primary" id="btn-create-saved-view" title="Save current view">
                                                     <i class="bi bi-plus-lg"></i>
                                                 </button>
                                             </div>
-                                            <div id="saved-view-list" class="folder-tree"></div>
+                                            <div id="saved-view-list" class="folder-tree mobile-collapsible mobile-collapsed"></div>
                                         </div>
                                         <!-- Recordings table -->
                                         <div class="col table-responsive">
@@ -213,6 +217,7 @@
                                                 </thead>
                                                 <tbody id="recordings-body"></tbody>
                                             </table>
+                                            <div id="recording-card-list" class="recording-card-list d-none"></div>
                                             <!-- Bulk actions bar -->
                                             <div id="bulk-actions-bar" class="bulk-actions-bar d-none">
                                                 <span id="bulk-selected-count" class="small text-muted me-2"></span>

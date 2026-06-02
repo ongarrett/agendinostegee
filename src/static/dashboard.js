@@ -197,12 +197,113 @@ function renderCollectionBadges(collections) {
         .join("");
 }
 
+function statusText(ok, yes = "Ready", no = "Missing") {
+    return ok
+        ? `<span class="badge bg-success-subtle text-success-emphasis">${yes}</span>`
+        : `<span class="badge bg-secondary-subtle text-secondary-emphasis">${no}</span>`;
+}
+
+function mobileCardActionMenu(rec) {
+    const items = [];
+    const item = (classes, attrs, icon, label, disabled = false) => {
+        items.push(
+            `<button class="dropdown-item ${classes}" type="button" ${attrs} ${disabled ? "disabled" : ""}>
+                <i class="bi ${icon} me-2"></i>${label}
+            </button>`
+        );
+    };
+
+    item("btn-view-detail", `data-name="${rec.name}"`, "bi-layout-text-sidebar-reverse", "View");
+    item("btn-ask-recording", `data-name="${rec.name}"`, "bi-chat-square-text", "Ask AI", !rec.in_db);
+
+    item("btn-view-transcript", `data-name="${rec.name}"`, "bi-file-text", "Transcript", !rec.has_transcript);
+    item("btn-summarize", `data-name="${rec.name}"`, "bi-stars", "Generate Summary", !rec.has_transcript);
+    item(
+        "btn-transcribe",
+        `data-name="${rec.name}" data-engine="gemini"`,
+        "bi-mic",
+        "Transcribe",
+        rec.has_transcript || !rec.on_local
+    );
+
+    item("btn-view-summary", `data-name="${rec.name}"`, "bi-journal-text", "Summary", !rec.has_summary);
+    item(
+        "btn-index-recording",
+        `data-name="${rec.name}" data-force="${rec.embedding_status === "indexed" ? "true" : "false"}"`,
+        "bi-diagram-3",
+        rec.embedding_status === "indexed" ? "Regenerate Index" : "Index",
+        !rec.in_db
+    );
+
+    if (rec.on_local) {
+        item("btn-play-audio", `data-name="${rec.name}"`, "bi-play-circle", "Play Audio");
+    }
+    if (rec.in_db) {
+        item("btn-manage-collections", `data-name="${rec.name}"`, "bi-collection", "Collections");
+    }
+    item(
+        "btn-delete-recording text-danger",
+        `data-name="${rec.name}" data-on-device="${rec.on_device}" data-on-local="${rec.on_local}" data-in-db="${rec.in_db}"`,
+        "bi-trash3",
+        "Delete"
+    );
+
+    return `<div class="dropdown recording-card-actions">
+        <button class="btn btn-outline-dark recording-actions-toggle" type="button" aria-expanded="false">
+            <i class="bi bi-three-dots-vertical me-1"></i>Actions
+        </button>
+        <div class="dropdown-menu dropdown-menu-end recording-actions-menu">
+            ${items.join("")}
+        </div>
+    </div>`;
+}
+
+function renderMobileRecordingCard(rec) {
+    const dateStr = rec.date && rec.time ? `${rec.date} ${rec.time}` : (rec.date || "No date");
+    const title = rec.db_title || rec.name;
+    const collectionHtml = renderCollectionBadges(rec.collections);
+    const tagHtml = renderTags(rec.db_tags);
+    const hasMeta = (rec.collections && rec.collections.length > 0) || (rec.db_tags && rec.db_tags.length > 0);
+
+    return `<article class="recording-card">
+        <div class="recording-card-header">
+            <div class="recording-card-title-wrap">
+                <label class="recording-card-select">
+                    <input type="checkbox" class="rec-checkbox" data-name="${rec.name}" ${!rec.in_db ? "disabled" : ""}>
+                    <span class="visually-hidden">Select ${escapeHtml(rec.name)}</span>
+                </label>
+                <div>
+                    <h4 class="recording-card-title">${escapeHtml(title)}</h4>
+                    <div class="recording-card-name">${escapeHtml(rec.name)}</div>
+                </div>
+            </div>
+            ${mobileCardActionMenu(rec)}
+        </div>
+        <div class="recording-card-facts">
+            <span><i class="bi bi-calendar3 me-1"></i>${escapeHtml(dateStr)}</span>
+            <span><i class="bi bi-clock me-1"></i>${escapeHtml(formatDuration(rec.duration))}</span>
+        </div>
+        <div class="recording-card-statuses">
+            <div><span class="recording-card-status-label">Transcript</span>${statusText(rec.has_transcript)}</div>
+            <div><span class="recording-card-status-label">Summary</span>${statusText(rec.has_summary)}</div>
+            <div><span class="recording-card-status-label">Index</span>${renderEmbeddingStatus(rec.embedding_status, rec.embedding_error)}</div>
+        </div>
+        <details class="recording-card-meta ${hasMeta ? "" : "recording-card-meta-empty"}">
+            <summary>Collections & tags</summary>
+            <div class="recording-card-meta-body">
+                <div class="mb-2"><span class="recording-card-status-label">Collections</span>${collectionHtml}</div>
+                <div><span class="recording-card-status-label">Tags</span>${tagHtml}</div>
+            </div>
+        </details>
+    </article>`;
+}
+
 function renderPlainText(text) {
     return escapeHtml(text || "").replace(/\n/g, "<br>");
 }
 
 function selectedRecordingNames() {
-    return Array.from(document.querySelectorAll(".rec-checkbox:checked")).map(cb => cb.dataset.name);
+    return [...new Set(Array.from(document.querySelectorAll(".rec-checkbox:checked")).map(cb => cb.dataset.name))];
 }
 
 function findRecording(name) {
@@ -662,9 +763,9 @@ function updateBulkActionsBar() {
     const bar = $("#bulk-actions-bar");
     const countEl = $("#bulk-selected-count");
     if (!bar || !countEl) return;
-    const checked = document.querySelectorAll(".rec-checkbox:checked");
-    if (checked.length > 0) {
-        countEl.textContent = `${checked.length} selected`;
+    const checkedNames = selectedRecordingNames();
+    if (checkedNames.length > 0) {
+        countEl.textContent = `${checkedNames.length} selected`;
         show(bar);
     } else {
         hide(bar);
@@ -674,6 +775,7 @@ function updateBulkActionsBar() {
 function renderFilteredTable() {
     const table = $("#recordings-table");
     const tbody = $("#recordings-body");
+    const cardList = $("#recording-card-list");
     const emptyEl = $("#empty-state");
 
     const folderFiltered = filterRecordingsByFolder(_allRecordings, _currentFolder);
@@ -688,18 +790,29 @@ function renderFilteredTable() {
 
     if (filtered.length === 0) {
         hide(table);
+        if (cardList) {
+            cardList.innerHTML = "";
+            hide(cardList);
+        }
         show(emptyEl);
         hide($("#bulk-actions-bar"));
         return;
     }
 
     tbody.innerHTML = filtered.map(renderRow).join("");
+    if (cardList) {
+        cardList.innerHTML = filtered.map(renderMobileRecordingCard).join("");
+        show(cardList);
+    }
     show(table);
     hide(emptyEl);
 
     // Reset select-all
     const selectAll = $("#select-all-recordings");
     if (selectAll) selectAll.checked = false;
+    document.querySelectorAll("#recording-card-list .rec-checkbox").forEach(cb => {
+        cb.checked = false;
+    });
     hide($("#bulk-actions-bar"));
 }
 
@@ -857,7 +970,7 @@ document.addEventListener("DOMContentLoaded", () => {
         document.querySelectorAll(".recording-actions-menu.show").forEach(menu => {
             if (menu !== exceptMenu) {
                 menu.classList.remove("show");
-                menu.closest(".recording-actions-mobile")
+                menu.closest(".recording-actions-mobile, .recording-card-actions")
                     ?.querySelector(".recording-actions-toggle")
                     ?.setAttribute("aria-expanded", "false");
             }
@@ -883,7 +996,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (toggle) {
             e.preventDefault();
             e.stopPropagation();
-            const menu = toggle.closest(".recording-actions-mobile")?.querySelector(".recording-actions-menu");
+            const menu = toggle.closest(".recording-actions-mobile, .recording-card-actions")?.querySelector(".recording-actions-menu");
             if (!menu) return;
             const willOpen = !menu.classList.contains("show");
             closeRecordingActionMenus(menu);
@@ -897,9 +1010,19 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        if (!e.target.closest(".recording-actions-mobile")) {
+        if (!e.target.closest(".recording-actions-mobile, .recording-card-actions")) {
             closeRecordingActionMenus();
         }
+    });
+
+    document.addEventListener("click", (e) => {
+        const sectionToggle = e.target.closest(".mobile-section-toggle");
+        if (!sectionToggle || e.target.closest("button")) return;
+        if (!window.matchMedia("(max-width: 991.98px)").matches) return;
+        const target = document.getElementById(sectionToggle.dataset.mobileSectionTarget);
+        if (!target) return;
+        const collapsed = target.classList.toggle("mobile-collapsed");
+        sectionToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
     });
 
     async function generateEmbeddings(names, force = false) {
@@ -1225,6 +1348,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (askAiBtn) askAiBtn.addEventListener("click", (e) => { e.preventDefault(); openAskAiModal(); });
     if (askAiBulkBtn) askAiBulkBtn.addEventListener("click", (e) => { e.preventDefault(); openAskAiModal(selectedRecordingNames()); });
+    document.addEventListener("click", (e) => {
+        const askRecordingBtn = e.target.closest(".btn-ask-recording");
+        if (!askRecordingBtn) return;
+        e.preventDefault();
+        openAskAiModal([askRecordingBtn.dataset.name]);
+    });
     if (indexCollectionBtn) {
         indexCollectionBtn.addEventListener("click", (e) => {
             e.preventDefault();
@@ -1354,15 +1483,15 @@ document.addEventListener("DOMContentLoaded", () => {
     document.addEventListener("change", (e) => {
         if (e.target.id === "select-all-recordings") {
             const checked = e.target.checked;
-            document.querySelectorAll(".rec-checkbox:not(:disabled)").forEach(cb => cb.checked = checked);
+            document.querySelectorAll("#recordings-body .rec-checkbox:not(:disabled)").forEach(cb => cb.checked = checked);
             updateBulkActionsBar();
             return;
         }
         if (e.target.classList.contains("rec-checkbox")) {
             updateBulkActionsBar();
             // Update select-all state
-            const all = document.querySelectorAll(".rec-checkbox:not(:disabled)");
-            const allChecked = document.querySelectorAll(".rec-checkbox:checked");
+            const all = document.querySelectorAll("#recordings-body .rec-checkbox:not(:disabled)");
+            const allChecked = document.querySelectorAll("#recordings-body .rec-checkbox:checked");
             const selectAll = $("#select-all-recordings");
             if (selectAll) selectAll.checked = all.length > 0 && all.length === allChecked.length;
         }
