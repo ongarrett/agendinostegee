@@ -2394,7 +2394,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
         let html = `
             <div class="alert alert-info py-2">
-                Pairs: <strong>${counts.pairs || 0}</strong> ·
+                Import items: <strong>${counts.pairs || 0}</strong> ·
+                Audio only: <strong>${counts.audio_only || 0}</strong> ·
                 Importable: <strong>${counts.importable || 0}</strong> ·
                 Duplicates: <strong>${counts.duplicates || 0}</strong> ·
                 Unmatched: <strong>${counts.unmatched || 0}</strong> ·
@@ -2421,11 +2422,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 html += `<tr>
                     <td><input type="checkbox" class="bulk-import-item" data-pair-id="${item.pair_id}" checked></td>
                     <td><span class="fw-semibold">${item.audio_file}</span></td>
-                    <td>${item.text_file}</td>
+                    <td>${item.text_file || '<span class="text-muted">Audio only</span>'}</td>
                     <td>${item.detected_title}</td>
-                    <td><span class="badge bg-success">${item.transcript_status}</span></td>
-                    <td><span class="badge ${item.summary_status === "needs review" ? "bg-warning text-dark" : "bg-success"}">${item.summary_status}</span></td>
-                    <td><span class="badge ${item.status === "needs review" ? "bg-warning text-dark" : "bg-primary"}">${item.status}</span></td>
+                    <td><span class="badge ${item.transcript_status === "missing" ? "bg-secondary" : "bg-success"}">${item.transcript_status}</span></td>
+                    <td><span class="badge ${item.summary_status === "needs review" ? "bg-warning text-dark" : (item.summary_status === "missing" ? "bg-secondary" : "bg-success")}">${item.summary_status}</span></td>
+                    <td><span class="badge ${item.status === "needs review" ? "bg-warning text-dark" : (item.status === "audio only" ? "bg-secondary" : "bg-primary")}">${item.status}</span></td>
                 </tr>`;
             }
             html += `</tbody></table></div>
@@ -2486,7 +2487,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             if (!isFolderMode && (!bulkImportFilesInput?.files || bulkImportFilesInput.files.length === 0)) {
                 bulkImportResult.className = "alert alert-danger mt-3";
-                bulkImportResult.textContent = "Choose .mp3 and .txt files first.";
+                bulkImportResult.textContent = "Choose .hda, .mp3, or .txt files first.";
                 show(bulkImportResult);
                 return;
             }
@@ -2573,7 +2574,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const counts = data.counts || {};
             bulkImportResult.className = "alert alert-success mt-3";
             bulkImportResult.innerHTML = `<i class="bi bi-check-circle me-1"></i>
-                Imported ${counts.imported || 0}; duplicates ${counts.skipped_duplicate || 0}; errors ${counts.errors || 0}.`;
+                Imported ${counts.imported || 0}; audio-only ${counts.audio_only || 0}; duplicates ${counts.skipped_duplicate || 0}; errors ${counts.errors || 0}.`;
             await loadDashboard();
             setTimeout(closeBulkImportModal, 1400);
         } catch (err) {

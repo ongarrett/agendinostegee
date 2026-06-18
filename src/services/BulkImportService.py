@@ -12,12 +12,13 @@ from models.DBRecording import DBRecording
 from repositories.LocalRecordingsRepository import LocalRecordingsRepository
 from repositories.SqliteDBRepository import SqliteDBRepository
 
-AUDIO_EXTENSIONS = {".mp3"}
+AUDIO_EXTENSIONS = {".hda", ".mp3"}
 TEXT_EXTENSIONS = {".txt"}
 SUPPORTED_EXTENSIONS = AUDIO_EXTENSIONS | TEXT_EXTENSIONS
 PAIR_MATCH_THRESHOLD = 0.58
 SUMMARY_NEEDS_REVIEW = "Needs review: no clear summary section was detected in the imported text file."
 PAIR_STATUS_MATCHED = "matched"
+PAIR_STATUS_AUDIO_ONLY = "audio only"
 PAIR_STATUS_NEEDS_REVIEW = "needs review"
 PAIR_STATUS_DUPLICATE = "skipped duplicate"
 
@@ -168,6 +169,7 @@ class BulkImportService:
             "mode": mode,
             "counts": {
                 "pairs": len(preview_pairs),
+                "audio_only": len([pair for pair in preview_pairs if pair.get("text_file") is None]),
                 "importable": importable_count,
                 "duplicates": duplicate_count,
                 "unmatched": len(unmatched),
@@ -210,6 +212,7 @@ class BulkImportService:
             "ok": True,
             "counts": {
                 "imported": len(imported),
+                "audio_only": len([item for item in imported if item.get("text_file") is None]),
                 "skipped_duplicate": len(skipped),
                 "unmatched": len(unmatched),
                 "unsupported": len(unsupported),
@@ -232,16 +235,12 @@ class BulkImportService:
             match = self._best_text_match(audio, text_files, used_text_refs)
             if match:
                 used_text_refs.add(self._source_ref(match))
-                pairs.append({"audio": audio, "text": match})
+            pairs.append({"audio": audio, "text": match})
 
         unmatched = []
-        paired_audio_refs = {self._source_ref(pair["audio"]) for pair in pairs}
-        for audio in audio_files:
-            if self._source_ref(audio) not in paired_audio_refs:
-                unmatched.append(self._public_source(audio, reason="No matching .txt file found"))
         for text in text_files:
             if self._source_ref(text) not in used_text_refs:
-                unmatched.append(self._public_source(text, reason="No matching .mp3 file found"))
+                unmatched.append(self._public_source(text, reason="No matching audio file found"))
         return pairs, unmatched
 
     def _best_text_match(self, audio: dict, text_files: list[dict], used_text_refs: set[str]) -> dict | None:
@@ -262,14 +261,15 @@ class BulkImportService:
 
     def _preview_pair(self, pair: dict, include_sources: bool = False) -> dict:
         audio = pair["audio"]
-        text = pair["text"]
-        text_content = self._read_source_text(text)
-        parsed = self._parse_text_sections(text_content)
+        text = pair.get("text")
+        parsed = self._parse_text_sections(self._read_source_text(text)) if text else self._empty_audio_only_parse()
         recording_name = Path(audio["filename"]).stem
         title = self._title_from_name(recording_name)
         audio_hash = self._source_hash(audio)
         duplicate_reason = self._audio_duplicate_reason(audio, recording_name, audio_hash)
         status = PAIR_STATUS_DUPLICATE if duplicate_reason else PAIR_STATUS_MATCHED
+        if not duplicate_reason and text is None:
+            status = PAIR_STATUS_AUDIO_ONLY
         if not duplicate_reason and parsed["summary_status"] == PAIR_STATUS_NEEDS_REVIEW:
             status = PAIR_STATUS_NEEDS_REVIEW
 
@@ -277,7 +277,7 @@ class BulkImportService:
             "pair_id": self._pair_id(audio, text),
             "status": status,
             "audio_file": audio["filename"],
-            "text_file": text["filename"],
+            "text_file": text["filename"] if text else None,
             "recording_name": recording_name,
             "detected_title": title,
             "summary_status": parsed["summary_status"],
@@ -313,26 +313,38 @@ class BulkImportService:
             name=recording_name,
             label=pair["detected_title"],
             duration=self._get_audio_duration(dest_path),
-            file_extension="mp3",
+            file_extension=Path(audio["filename"]).suffix.lower().lstrip(".") or "mp3",
             created_at=datetime.now(),
             recorded_at=self._parse_recording_datetime(recording_name),
             transcript=parsed["transcript"],
         )
         db_id = self._sqlite_db_repository.insert_recording(db_rec)
-        self._sqlite_db_repository.save_summarization_result(
-            recording_name,
-            summary=parsed["summary"] or SUMMARY_NEEDS_REVIEW,
-            title=pair["detected_title"],
-            tags="needs-review" if parsed["summary_status"] == PAIR_STATUS_NEEDS_REVIEW else "",
-            prompt_id=(
-                "bulk_import_needs_review" if parsed["summary_status"] == PAIR_STATUS_NEEDS_REVIEW else "bulk_import"
-            ),
-        )
+        if pair.get("_text") is not None:
+            self._sqlite_db_repository.save_summarization_result(
+                recording_name,
+                summary=parsed["summary"] or SUMMARY_NEEDS_REVIEW,
+                title=pair["detected_title"],
+                tags="needs-review" if parsed["summary_status"] == PAIR_STATUS_NEEDS_REVIEW else "",
+                prompt_id=(
+                    "bulk_import_needs_review"
+                    if parsed["summary_status"] == PAIR_STATUS_NEEDS_REVIEW
+                    else "bulk_import"
+                ),
+            )
 
         return {
             **self._public_pair(pair),
             "status": "imported",
             "db_id": db_id,
+        }
+
+    @staticmethod
+    def _empty_audio_only_parse() -> dict:
+        return {
+            "transcript": None,
+            "summary": None,
+            "transcript_status": "missing",
+            "summary_status": "missing",
         }
 
     @staticmethod
@@ -419,8 +431,9 @@ class BulkImportService:
         return " ".join(filtered or tokens)
 
     @staticmethod
-    def _pair_id(audio: dict, text: dict) -> str:
-        raw = f"{BulkImportService._source_ref(audio)}|{BulkImportService._source_ref(text)}"
+    def _pair_id(audio: dict, text: dict | None) -> str:
+        text_ref = BulkImportService._source_ref(text) if text else "audio-only"
+        raw = f"{BulkImportService._source_ref(audio)}|{text_ref}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
     @staticmethod

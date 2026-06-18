@@ -39,6 +39,82 @@ def test_upload_preview_pairs_mp3_and_txt_by_filename_similarity(bulk_import_ser
     assert pair["transcript_status"] == "detected"
 
 
+def test_upload_preview_treats_hda_as_audio_only_import(bulk_import_service):
+    service, _db, _local_repo = bulk_import_service
+    files = [("2026Jun01-090000-Rec01.hda", b"hda audio")]
+
+    result = service.preview_upload(files)
+
+    assert result["ok"] is True
+    assert result["counts"]["pairs"] == 1
+    assert result["counts"]["audio_only"] == 1
+    assert result["counts"]["importable"] == 1
+    assert result["counts"]["unsupported"] == 0
+    assert result["counts"]["unmatched"] == 0
+    item = result["pairs"][0]
+    assert item["audio_file"] == "2026Jun01-090000-Rec01.hda"
+    assert item["text_file"] is None
+    assert item["status"] == "audio only"
+    assert item["summary_status"] == "missing"
+    assert item["transcript_status"] == "missing"
+
+
+def test_upload_confirm_imports_mp3_without_companion_txt(bulk_import_service):
+    service, db, local_repo = bulk_import_service
+    files = [("audio-only.mp3", b"mp3 audio")]
+
+    result = service.confirm_upload(files)
+
+    assert result["ok"] is True
+    assert result["counts"]["imported"] == 1
+    assert result["counts"]["audio_only"] == 1
+    assert result["counts"]["unmatched"] == 0
+    assert local_repo.exists("audio-only.mp3")
+
+    recording = db.get_recording_by_name("audio-only")
+    assert recording is not None
+    assert recording.file_extension == "mp3"
+    assert recording.transcript is None
+    assert db.get_summaries("audio-only") == []
+
+
+def test_upload_confirm_imports_hda_without_companion_txt(bulk_import_service):
+    service, db, local_repo = bulk_import_service
+    files = [("device-recording.hda", b"hda audio")]
+
+    result = service.confirm_upload(files)
+
+    assert result["ok"] is True
+    assert result["counts"]["imported"] == 1
+    assert result["counts"]["audio_only"] == 1
+    assert local_repo.exists("device-recording.hda")
+
+    recording = db.get_recording_by_name("device-recording")
+    assert recording is not None
+    assert recording.file_extension == "hda"
+    assert recording.transcript is None
+    assert db.get_summaries("device-recording") == []
+
+
+def test_upload_confirm_still_imports_paired_mp3_and_txt(bulk_import_service):
+    service, db, local_repo = bulk_import_service
+    files = [
+        ("paired-session.mp3", b"mp3 audio"),
+        ("paired session.txt", b"Transcript\nSpeaker 1: imported text\n\nSummary\nImported summary"),
+    ]
+
+    result = service.confirm_upload(files)
+
+    assert result["ok"] is True
+    assert result["counts"]["imported"] == 1
+    assert result["counts"]["audio_only"] == 0
+    assert local_repo.exists("paired-session.mp3")
+    assert db.get_transcript("paired-session") == "Speaker 1: imported text"
+    summary = db.get_summaries("paired-session")[0]
+    assert summary.summary == "Imported summary"
+    assert summary.prompt_id == "bulk_import"
+
+
 def test_upload_preview_marks_unclear_txt_summary_as_needs_review(bulk_import_service):
     service, _db, _local_repo = bulk_import_service
     files = [("standup.mp3", b"audio"), ("standup.txt", b"Speaker 1: everything is one blob")]
