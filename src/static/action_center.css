@@ -1,0 +1,101 @@
+.action-count {
+    border-radius: var(--bs-border-radius);
+    padding: 1rem;
+    color: #fff;
+    min-height: 96px;
+}
+.action-count-value {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+}
+.action-count-label {
+    margin-top: .35rem;
+    font-size: .9rem;
+    opacity: .9;
+}
+.action-count-action {
+    background: var(--bs-primary);
+}
+.action-count-decision {
+    background: var(--bs-success);
+}
+.action-count-risk {
+    background: var(--bs-danger);
+}
+.action-count-question {
+    background: var(--bs-warning);
+    color: #212529;
+}
+.action-panel .card-title {
+    font-size: 1rem;
+}
+.action-group {
+    margin-bottom: 1rem;
+}
+.action-group h4 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0 0 .6rem;
+}
+.action-group-empty {
+    border: 1px dashed var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    padding: 1rem;
+    color: var(--bs-secondary-color);
+    background: var(--bs-tertiary-bg);
+}
+.action-item-card {
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    padding: .9rem 1rem;
+    background: var(--bs-body-bg);
+    margin-bottom: .65rem;
+}
+.action-item-card.status-done,
+.action-item-card.status-resolved,
+.action-item-card.status-dismissed {
+    opacity: .72;
+}
+.action-item-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: .75rem;
+}
+.action-item-text {
+    font-weight: 650;
+    line-height: 1.35;
+}
+.action-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem .5rem;
+    margin-top: .65rem;
+}
+.action-source-excerpt {
+    margin-top: .75rem;
+    padding: .65rem .75rem;
+    border-left: 3px solid var(--bs-border-color);
+    background: var(--bs-tertiary-bg);
+    color: var(--bs-secondary-color);
+    font-size: .86rem;
+    line-height: 1.45;
+}
+.action-item-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+    margin-top: .75rem;
+}
+@media (max-width: 768px) {
+    .action-item-header {
+        display: block;
+    }
+    .action-item-header .badge {
+        margin-top: .5rem;
+    }
+    .action-item-actions .btn {
+        min-height: 40px;
+    }
+}

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from .endpoints import auth
+from .endpoints import action_center
 from .endpoints import calendar
 from .endpoints import dashboard
 from .endpoints import knowledge
@@ -9,6 +10,7 @@ from .endpoints import proactor
 router = APIRouter()
 
 router.include_router(auth.router, prefix="/auth")
+router.include_router(action_center.router, prefix="/action-center")
 router.include_router(dashboard.router, prefix="/dashboard")
 router.include_router(calendar.router, prefix="/calendar")
 router.include_router(proactor.router, prefix="/proactor")

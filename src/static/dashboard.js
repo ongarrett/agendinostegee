@@ -914,7 +914,8 @@ function hideSyncOverlay() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    loadDashboard();
+    const initialRecordingName = new URLSearchParams(window.location.search).get("recording");
+    const dashboardReady = loadDashboard();
 
     const recordingSearchInput = $("#recording-search-input");
     const recordingDateFilter = $("#recording-date-filter");
@@ -4215,4 +4216,17 @@ document.addEventListener("DOMContentLoaded", () => {
             closeDateEditor();
         }
     });
+
+    if (initialRecordingName) {
+        dashboardReady.then(async () => {
+            openSummaryModal(initialRecordingName);
+            try {
+                await renderAndShowRecordingDetail(initialRecordingName);
+            } catch (err) {
+                hide(summaryLoading);
+                summaryError.textContent = `Failed to load recording details: ${err.message}`;
+                show(summaryError);
+            }
+        });
+    }
 });

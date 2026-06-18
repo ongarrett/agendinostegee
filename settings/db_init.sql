@@ -95,6 +95,33 @@ CREATE TABLE IF NOT EXISTS task
 CREATE INDEX IF NOT EXISTS idx_task_summary_id ON task (summary_id);
 CREATE INDEX IF NOT EXISTS idx_task_parent_task_id ON task (parent_task_id);
 
+CREATE TABLE IF NOT EXISTS action_center_item
+(
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    recording_id    INTEGER NOT NULL,
+    recording_name  TEXT    NOT NULL,
+    recording_title TEXT    DEFAULT NULL,
+    item_type       TEXT    NOT NULL,
+    text            TEXT    NOT NULL,
+    owner           TEXT    DEFAULT NULL,
+    due_date        TEXT    DEFAULT NULL,
+    topics          TEXT    DEFAULT NULL,
+    confidence      TEXT    DEFAULT NULL,
+    status          TEXT    NOT NULL DEFAULT 'open',
+    source_excerpt  TEXT    DEFAULT NULL,
+    source_hash     TEXT    DEFAULT NULL,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (recording_id) REFERENCES recording (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_action_center_item_recording ON action_center_item (recording_id);
+CREATE INDEX IF NOT EXISTS idx_action_center_item_type ON action_center_item (item_type);
+CREATE INDEX IF NOT EXISTS idx_action_center_item_owner ON action_center_item (owner);
+CREATE INDEX IF NOT EXISTS idx_action_center_item_status ON action_center_item (status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_action_center_item_unique_source
+    ON action_center_item (recording_id, item_type, text, source_hash);
+
 CREATE TABLE IF NOT EXISTS shared_calendar
 (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,

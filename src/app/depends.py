@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from dotenv import load_dotenv
 
+from controllers.ActionCenterController import ActionCenterController
 from controllers.CalendarController import CalendarController
 from controllers.DashboardController import DashboardController
 from controllers.ProactorController import ProactorController
@@ -21,6 +22,7 @@ from services.TranscriptionService import TranscriptionService
 from services.WhisperTranscriptionService import WhisperTranscriptionService
 from services.DailyRecapService import DailyRecapService
 from services.AuthService import AuthService
+from services.ActionIntelligenceService import ActionIntelligenceService, GeminiActionExtractionService
 from services.BulkImportService import BulkImportService
 from services.ICalSyncService import ICalSyncService
 from services.ProactorService import ProactorService
@@ -209,6 +211,13 @@ def get_proactor_controller() -> ProactorController:
     )
 
 
+def get_action_center_controller() -> ActionCenterController:
+    return ActionCenterController(
+        template_path=get_template_path(),
+        auth_enabled=is_auth_enabled(),
+    )
+
+
 def get_vector_store_repository() -> VectorStoreRepository:
     _config = get_config()
     return VectorStoreRepository(
@@ -243,6 +252,21 @@ def get_recording_qa_service() -> RecordingQAService:
             api_key=api_key,
             model=_config["GEMINI_MODEL"],
         ),
+    )
+
+
+def get_action_intelligence_service() -> ActionIntelligenceService:
+    _config = get_config()
+    api_key = _config.get("GEMINI_API_KEY")
+    extraction_service = None
+    if _is_valid_gemini_api_key(api_key):
+        extraction_service = GeminiActionExtractionService(
+            api_key=api_key.strip(),
+            model=_config["GEMINI_MODEL"],
+        )
+    return ActionIntelligenceService(
+        sqlite_db_repository=get_sqlite_db_repository(),
+        extraction_service=extraction_service,
     )
 
 

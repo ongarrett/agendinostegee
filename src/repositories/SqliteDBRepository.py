@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 
+from models.DBActionCenterItem import DBActionCenterItem
 from models.DBCalendarEvent import DBCalendarEvent
 from models.DBDailyRecap import DBDailyRecap
 from models.DBRecording import DBRecording
@@ -19,6 +20,7 @@ class SqliteDBRepository:
         self._ensure_collection_tables()
         self._ensure_saved_view_tables()
         self._ensure_embedding_tables()
+        self._ensure_action_center_tables()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -133,6 +135,46 @@ class SqliteDBRepository:
 
                 CREATE INDEX IF NOT EXISTS idx_recording_embedding_status
                     ON recording_embedding (status);
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _ensure_action_center_tables(self) -> None:
+        """Migration: add action center tables for existing local databases."""
+        conn = self._connect()
+        try:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS action_center_item
+                (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recording_id    INTEGER NOT NULL,
+                    recording_name  TEXT    NOT NULL,
+                    recording_title TEXT    DEFAULT NULL,
+                    item_type       TEXT    NOT NULL,
+                    text            TEXT    NOT NULL,
+                    owner           TEXT    DEFAULT NULL,
+                    due_date        TEXT    DEFAULT NULL,
+                    topics          TEXT    DEFAULT NULL,
+                    confidence      TEXT    DEFAULT NULL,
+                    status          TEXT    NOT NULL DEFAULT 'open',
+                    source_excerpt  TEXT    DEFAULT NULL,
+                    source_hash     TEXT    DEFAULT NULL,
+                    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+                    updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (recording_id) REFERENCES recording (id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_action_center_item_recording
+                    ON action_center_item (recording_id);
+                CREATE INDEX IF NOT EXISTS idx_action_center_item_type
+                    ON action_center_item (item_type);
+                CREATE INDEX IF NOT EXISTS idx_action_center_item_owner
+                    ON action_center_item (owner);
+                CREATE INDEX IF NOT EXISTS idx_action_center_item_status
+                    ON action_center_item (status);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_action_center_item_unique_source
+                    ON action_center_item (recording_id, item_type, text, source_hash);
             """)
             conn.commit()
         finally:
@@ -1016,6 +1058,270 @@ class SqliteDBRepository:
                     }
                 )
             return sources
+        finally:
+            conn.close()
+
+    # ─── Action Center operations ────────────────────────────────
+
+    @staticmethod
+    def _action_center_item_from_row(row) -> DBActionCenterItem:
+        return DBActionCenterItem.from_dict(row)
+
+    def get_action_center_sources(
+        self,
+        names: list[str] | None = None,
+        collection_id: int | None = None,
+        summarized_only: bool = False,
+        transcribed_only: bool = False,
+    ) -> list[dict]:
+        conn = self._connect()
+        try:
+            joins = []
+            where = []
+            params = []
+            if collection_id is not None:
+                joins.append("JOIN recording_collection rc ON rc.recording_id = r.id")
+                where.append("rc.collection_id = ?")
+                params.append(collection_id)
+            if names:
+                placeholders = ",".join(["?"] * len(names))
+                where.append(f"r.name IN ({placeholders})")
+                params.extend(names)
+            if summarized_only:
+                where.append("s.summary IS NOT NULL AND length(trim(s.summary)) > 0")
+            if transcribed_only:
+                where.append("r.transcript IS NOT NULL AND length(trim(r.transcript)) > 0")
+
+            where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+            join_sql = "\n".join(joins)
+            rows = conn.execute(
+                f"""
+                SELECT
+                    r.id,
+                    r.name,
+                    r.label,
+                    r.recorded_at,
+                    r.created_at,
+                    r.transcript,
+                    s.title,
+                    s.tags,
+                    s.summary,
+                    s.created_at AS summary_created_at
+                FROM recording r
+                {join_sql}
+                LEFT JOIN (
+                    SELECT s1.*
+                    FROM summary s1
+                    JOIN (
+                        SELECT recording_id, MAX(version) AS max_version
+                        FROM summary
+                        GROUP BY recording_id
+                    ) latest
+                        ON latest.recording_id = s1.recording_id
+                        AND latest.max_version = s1.version
+                ) s ON s.recording_id = r.id
+                {where_sql}
+                ORDER BY COALESCE(r.recorded_at, r.created_at) DESC, r.name
+                """,
+                params,
+            ).fetchall()
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "label": row["label"],
+                    "recording_title": row["title"] or row["label"] or row["name"],
+                    "recorded_at": row["recorded_at"],
+                    "created_at": row["created_at"],
+                    "summary": row["summary"] or "",
+                    "summary_tags": row["tags"] or "",
+                    "transcript": row["transcript"] or "",
+                }
+                for row in rows
+            ]
+        finally:
+            conn.close()
+
+    def has_action_center_items_for_recording(self, recording_id: int) -> bool:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM action_center_item WHERE recording_id = ?",
+                (recording_id,),
+            ).fetchone()
+            return bool(row and int(row["count"]) > 0)
+        finally:
+            conn.close()
+
+    def delete_open_action_center_items_for_recording(self, recording_id: int) -> int:
+        conn = self._connect()
+        try:
+            result = conn.execute(
+                """
+                DELETE FROM action_center_item
+                WHERE recording_id = ?
+                  AND status IN ('open', 'pending')
+                """,
+                (recording_id,),
+            )
+            conn.commit()
+            return result.rowcount
+        finally:
+            conn.close()
+
+    def save_action_center_items(self, items: list[DBActionCenterItem]) -> list[DBActionCenterItem]:
+        conn = self._connect()
+        saved = []
+        try:
+            for item in items:
+                topics_json = json.dumps(item.topics or [])
+                result = conn.execute(
+                    """
+                    INSERT INTO action_center_item
+                        (
+                            recording_id,
+                            recording_name,
+                            recording_title,
+                            item_type,
+                            text,
+                            owner,
+                            due_date,
+                            topics,
+                            confidence,
+                            status,
+                            source_excerpt,
+                            source_hash,
+                            updated_at
+                        )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(recording_id, item_type, text, source_hash) DO UPDATE SET
+                        recording_title = excluded.recording_title,
+                        owner = COALESCE(action_center_item.owner, excluded.owner),
+                        due_date = COALESCE(action_center_item.due_date, excluded.due_date),
+                        topics = excluded.topics,
+                        confidence = excluded.confidence,
+                        source_excerpt = excluded.source_excerpt,
+                        updated_at = datetime('now')
+                    """,
+                    (
+                        item.recording_id,
+                        item.recording_name,
+                        item.recording_title,
+                        item.item_type,
+                        item.text,
+                        item.owner,
+                        item.due_date,
+                        topics_json,
+                        item.confidence,
+                        item.status,
+                        item.source_excerpt,
+                        item.source_hash,
+                    ),
+                )
+                item.id = result.lastrowid or item.id
+                saved.append(item)
+            conn.commit()
+            return saved
+        finally:
+            conn.close()
+
+    def list_action_center_items(
+        self,
+        item_type: str | None = None,
+        owner: str | None = None,
+        topic: str | None = None,
+        recording_name: str | None = None,
+        date_filter: str | None = None,
+        include_dismissed: bool = False,
+    ) -> list[DBActionCenterItem]:
+        conn = self._connect()
+        try:
+            where = []
+            params = []
+            if item_type:
+                where.append("item_type = ?")
+                params.append(item_type)
+            if owner:
+                where.append("owner = ?")
+                params.append(owner)
+            if topic:
+                where.append("topics LIKE ?")
+                params.append(f"%{topic}%")
+            if recording_name:
+                where.append("recording_name = ?")
+                params.append(recording_name)
+            if date_filter:
+                where.append("date(created_at) = ?")
+                params.append(date_filter)
+            if not include_dismissed:
+                where.append("status != 'dismissed'")
+            where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM action_center_item
+                {where_sql}
+                ORDER BY
+                    CASE item_type
+                        WHEN 'action_item' THEN 1
+                        WHEN 'risk' THEN 2
+                        WHEN 'open_question' THEN 3
+                        WHEN 'decision' THEN 4
+                        ELSE 5
+                    END,
+                    created_at DESC,
+                    id DESC
+                """,
+                params,
+            ).fetchall()
+            return [self._action_center_item_from_row(row) for row in rows]
+        finally:
+            conn.close()
+
+    def update_action_center_item_status(self, item_id: int, status: str) -> DBActionCenterItem | None:
+        conn = self._connect()
+        try:
+            existing = conn.execute("SELECT id FROM action_center_item WHERE id = ?", (item_id,)).fetchone()
+            if not existing:
+                return None
+            conn.execute(
+                "UPDATE action_center_item SET status = ?, updated_at = datetime('now') WHERE id = ?",
+                (status, item_id),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM action_center_item WHERE id = ?", (item_id,)).fetchone()
+            return self._action_center_item_from_row(row) if row else None
+        finally:
+            conn.close()
+
+    def get_action_center_filter_options(self) -> dict:
+        conn = self._connect()
+        try:
+            owners = [row["owner"] for row in conn.execute("""
+                    SELECT DISTINCT owner
+                    FROM action_center_item
+                    WHERE owner IS NOT NULL AND trim(owner) != ''
+                    ORDER BY owner
+                    """).fetchall()]
+            recordings = [{"name": row["recording_name"], "title": row["recording_title"]} for row in conn.execute("""
+                    SELECT DISTINCT recording_name, recording_title
+                    FROM action_center_item
+                    ORDER BY recording_title, recording_name
+                    """).fetchall()]
+            topic_set = set()
+            rows = conn.execute(
+                "SELECT topics FROM action_center_item WHERE topics IS NOT NULL AND trim(topics) != ''"
+            ).fetchall()
+            for row in rows:
+                try:
+                    topic_set.update(json.loads(row["topics"]))
+                except (TypeError, json.JSONDecodeError):
+                    topic_set.update(part.strip() for part in row["topics"].split(",") if part.strip())
+            return {
+                "owners": owners,
+                "topics": sorted(topic for topic in topic_set if topic),
+                "recordings": recordings,
+            }
         finally:
             conn.close()
 
