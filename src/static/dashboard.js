@@ -2394,11 +2394,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
         let html = `
             <div class="alert alert-info py-2">
-                Import items: <strong>${counts.pairs || 0}</strong> ·
+                Import candidates: <strong>${counts.pairs || 0}</strong> ·
                 Audio only: <strong>${counts.audio_only || 0}</strong> ·
                 Importable: <strong>${counts.importable || 0}</strong> ·
                 Duplicates: <strong>${counts.duplicates || 0}</strong> ·
-                Unmatched: <strong>${counts.unmatched || 0}</strong> ·
+                Unmatched text: <strong>${counts.unmatched || 0}</strong> ·
                 Unsupported: <strong>${counts.unsupported || 0}</strong> ·
                 Errors: <strong>${counts.errors || 0}</strong>
             </div>`;
@@ -2410,7 +2410,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         <tr>
                             <th><input type="checkbox" id="bulk-import-select-all" checked></th>
                             <th>Audio</th>
-                            <th>Matched Text</th>
+                            <th>Transcript file</th>
                             <th>Title</th>
                             <th>Transcript</th>
                             <th>Summary</th>
@@ -2445,7 +2445,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const skipped = [...duplicates, ...unmatched, ...unsupported, ...errors];
         if (skipped.length > 0) {
-            html += `<details class="mt-3"><summary class="small text-muted">Skipped and duplicate files</summary>
+            html += `<details class="mt-3"><summary class="small text-muted">Skipped, duplicate, and unsupported files</summary>
                 <ul class="small mt-2">`;
             for (const item of skipped.slice(0, 50)) {
                 const label = item.audio_file || item.filename || item.text_file || item.pair_id || "Item";
@@ -2487,7 +2487,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             if (!isFolderMode && (!bulkImportFilesInput?.files || bulkImportFilesInput.files.length === 0)) {
                 bulkImportResult.className = "alert alert-danger mt-3";
-                bulkImportResult.textContent = "Choose .hda, .mp3, or .txt files first.";
+                bulkImportResult.textContent = "Choose at least one .hda or .mp3 recording, plus optional .txt files.";
                 show(bulkImportResult);
                 return;
             }

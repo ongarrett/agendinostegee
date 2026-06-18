@@ -17,6 +17,7 @@ TEXT_EXTENSIONS = {".txt"}
 SUPPORTED_EXTENSIONS = AUDIO_EXTENSIONS | TEXT_EXTENSIONS
 PAIR_MATCH_THRESHOLD = 0.58
 SUMMARY_NEEDS_REVIEW = "Needs review: no clear summary section was detected in the imported text file."
+UNSUPPORTED_REASON = "Unsupported file type. Import supports .hda, .mp3, and optional .txt transcript files."
 PAIR_STATUS_MATCHED = "matched"
 PAIR_STATUS_AUDIO_ONLY = "audio only"
 PAIR_STATUS_NEEDS_REVIEW = "needs review"
@@ -130,7 +131,7 @@ class BulkImportService:
             try:
                 info = self._base_file_info(path)
                 if ext not in SUPPORTED_EXTENSIONS:
-                    unsupported.append({**info, "reason": "Unsupported file type"})
+                    unsupported.append({**info, "reason": UNSUPPORTED_REASON})
                     continue
                 sources.append({**info, "source_type": "path", "path": str(path.resolve())})
             except Exception as exc:
@@ -153,7 +154,7 @@ class BulkImportService:
             }
             if ext not in SUPPORTED_EXTENSIONS:
                 public_item = {k: v for k, v in item.items() if k != "data"}
-                unsupported.append({**public_item, "reason": "Unsupported file type"})
+                unsupported.append({**public_item, "reason": UNSUPPORTED_REASON})
                 continue
             sources.append(item)
         return sources, unsupported

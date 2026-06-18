@@ -6,7 +6,7 @@ import pytest
 from models.DBRecording import DBRecording
 from repositories.LocalRecordingsRepository import LocalRecordingsRepository
 from repositories.SqliteDBRepository import SqliteDBRepository
-from services.BulkImportService import BulkImportService, SUMMARY_NEEDS_REVIEW
+from services.BulkImportService import BulkImportService, SUMMARY_NEEDS_REVIEW, UNSUPPORTED_REASON
 
 
 @pytest.fixture
@@ -113,6 +113,19 @@ def test_upload_confirm_still_imports_paired_mp3_and_txt(bulk_import_service):
     summary = db.get_summaries("paired-session")[0]
     assert summary.summary == "Imported summary"
     assert summary.prompt_id == "bulk_import"
+
+
+def test_upload_preview_explains_unsupported_file_types(bulk_import_service):
+    service, _db, _local_repo = bulk_import_service
+    files = [("notes.pdf", b"not supported")]
+
+    result = service.preview_upload(files)
+
+    assert result["counts"]["unsupported"] == 1
+    assert result["unsupported"][0]["reason"] == UNSUPPORTED_REASON
+    assert ".hda" in result["unsupported"][0]["reason"]
+    assert ".mp3" in result["unsupported"][0]["reason"]
+    assert ".txt" in result["unsupported"][0]["reason"]
 
 
 def test_upload_preview_marks_unclear_txt_summary_as_needs_review(bulk_import_service):
