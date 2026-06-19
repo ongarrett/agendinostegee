@@ -39,6 +39,11 @@ const EMBEDDINGS_COLLECTION_URL = "/api/dashboard/embeddings/generate/collection
 const EMBEDDINGS_UNINDEXED_URL = "/api/dashboard/embeddings/generate/unindexed";
 const SEMANTIC_SEARCH_URL = "/api/dashboard/semantic-search";
 const ASK_RECORDINGS_URL = "/api/dashboard/ask";
+const QUEUE_TRANSCRIBE_NEWEST_URL = "/api/processing-queue/enqueue/transcribe-newest";
+const QUEUE_TRANSCRIBE_COLLECTION_URL = "/api/processing-queue/enqueue/transcribe-collection";
+const QUEUE_SUMMARIZE_NEWEST_URL = "/api/processing-queue/enqueue/summarize-newest";
+const QUEUE_SUMMARIZE_COLLECTION_URL = "/api/processing-queue/enqueue/summarize-collection";
+const QUEUE_SUMMARIZE_MISSING_URL = "/api/processing-queue/enqueue/summarize-missing";
 
 const show = (el) => el?.classList.remove("d-none");
 const hide = (el) => el?.classList.add("d-none");
@@ -930,6 +935,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const bulkTranscribeBtn = $("#btn-bulk-transcribe");
     const summarizeMissingBtn = $("#btn-summarize-missing");
     const bulkSummarizeBtn = $("#btn-bulk-summarize");
+    const queueTranscribe25Btn = $("#btn-queue-transcribe-25");
+    const queueTranscribe50Btn = $("#btn-queue-transcribe-50");
+    const queueTranscribeCollectionBtn = $("#btn-queue-transcribe-collection");
+    const queueSummarize25Btn = $("#btn-queue-summarize-25");
+    const queueSummarize50Btn = $("#btn-queue-summarize-50");
+    const queueSummarizeCollectionBtn = $("#btn-queue-summarize-collection");
+    const queueSummarizeMissingBtn = $("#btn-queue-summarize-missing");
     const mobileSidebarBtn = $("#btn-mobile-sidebar");
     const mobileSidebarBackdrop = $("#mobile-sidebar-backdrop");
     const folderSidebar = $("#folder-sidebar");
@@ -1117,10 +1129,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         const endpoint = untranscribed ? BULK_TRANSCRIBE_UNTRANSCRIBED_URL : BULK_TRANSCRIBE_SELECTED_URL;
-        const payload = untranscribed ? { engine: "gemini" } : { names, engine: "gemini" };
+        const payload = untranscribed ? { engine: "whisper" } : { names, engine: "whisper" };
         const label = untranscribed ? "untranscribed recordings" : `${names.length} selected recording(s)`;
 
-        if (!window.confirm(`Transcribe ${label} with Gemini? Existing transcripts will be skipped.`)) {
+        if (!window.confirm(`Transcribe ${label} with local Whisper? Existing transcripts will be skipped.`)) {
             return;
         }
 
@@ -1197,6 +1209,41 @@ document.addEventListener("DOMContentLoaded", () => {
             await loadDashboard();
         } catch (err) {
             showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Bulk summarization failed: ${escapeHtml(err.message)}`);
+        }
+    }
+
+    async function enqueueProcessingJob({ url, payload, triggerBtn, label }) {
+        const originalHtml = triggerBtn ? triggerBtn.innerHTML : "";
+        if (triggerBtn) {
+            triggerBtn.disabled = true;
+            triggerBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queueing…';
+        }
+        showDashboardAlert("alert-info", `<span class="spinner-border spinner-border-sm me-1"></span>Queueing ${escapeHtml(label)}…`);
+        try {
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                const error = data.detail || data.error || "Queue request failed.";
+                showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(error)}`);
+                return;
+            }
+            const counts = data.counts || {};
+            const message = data.message || `Queued ${counts.enqueued || 0} job(s).`;
+            showDashboardAlert(
+                "alert-success",
+                `<i class="bi bi-check-circle me-1"></i>${escapeHtml(message)} <a href="/processing-queue" class="alert-link">Open Processing Queue</a>`
+            );
+        } catch (err) {
+            showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Queue request failed: ${escapeHtml(err.message)}`);
+        } finally {
+            if (triggerBtn) {
+                triggerBtn.disabled = false;
+                triggerBtn.innerHTML = originalHtml;
+            }
         }
     }
 
@@ -1377,6 +1424,103 @@ document.addEventListener("DOMContentLoaded", () => {
         summarizeMissingBtn.addEventListener("click", (e) => {
             e.preventDefault();
             openPromptPicker("recordings missing summaries", { mode: "missing" });
+        });
+    }
+    if (queueTranscribe25Btn) {
+        queueTranscribe25Btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            enqueueProcessingJob({
+                url: QUEUE_TRANSCRIBE_NEWEST_URL,
+                payload: { limit: 25, engine: "whisper" },
+                triggerBtn: queueTranscribe25Btn,
+                label: "newest 25 untranscribed recordings",
+            });
+        });
+    }
+    if (queueTranscribe50Btn) {
+        queueTranscribe50Btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            enqueueProcessingJob({
+                url: QUEUE_TRANSCRIBE_NEWEST_URL,
+                payload: { limit: 50, engine: "whisper" },
+                triggerBtn: queueTranscribe50Btn,
+                label: "newest 50 untranscribed recordings",
+            });
+        });
+    }
+    if (queueTranscribeCollectionBtn) {
+        queueTranscribeCollectionBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            if (_currentCollection === null) {
+                showDashboardAlert("alert-warning", '<i class="bi bi-info-circle me-1"></i>Select a collection first.');
+                return;
+            }
+            enqueueProcessingJob({
+                url: QUEUE_TRANSCRIBE_COLLECTION_URL,
+                payload: { collection_id: _currentCollection, engine: "whisper" },
+                triggerBtn: queueTranscribeCollectionBtn,
+                label: "untranscribed recordings in the active collection",
+            });
+        });
+    }
+    if (queueSummarize25Btn) {
+        queueSummarize25Btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            openPromptPicker("newest 25 recordings missing summaries", {
+                mode: "queue",
+                queue: {
+                    url: QUEUE_SUMMARIZE_NEWEST_URL,
+                    payload: { limit: 25 },
+                    triggerBtn: queueSummarize25Btn,
+                    label: "newest 25 missing summaries",
+                },
+            });
+        });
+    }
+    if (queueSummarize50Btn) {
+        queueSummarize50Btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            openPromptPicker("newest 50 recordings missing summaries", {
+                mode: "queue",
+                queue: {
+                    url: QUEUE_SUMMARIZE_NEWEST_URL,
+                    payload: { limit: 50 },
+                    triggerBtn: queueSummarize50Btn,
+                    label: "newest 50 missing summaries",
+                },
+            });
+        });
+    }
+    if (queueSummarizeCollectionBtn) {
+        queueSummarizeCollectionBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            if (_currentCollection === null) {
+                showDashboardAlert("alert-warning", '<i class="bi bi-info-circle me-1"></i>Select a collection first.');
+                return;
+            }
+            openPromptPicker("active collection recordings missing summaries", {
+                mode: "queue",
+                queue: {
+                    url: QUEUE_SUMMARIZE_COLLECTION_URL,
+                    payload: { collection_id: _currentCollection },
+                    triggerBtn: queueSummarizeCollectionBtn,
+                    label: "missing summaries in the active collection",
+                },
+            });
+        });
+    }
+    if (queueSummarizeMissingBtn) {
+        queueSummarizeMissingBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            openPromptPicker("all recordings missing summaries", {
+                mode: "queue",
+                queue: {
+                    url: QUEUE_SUMMARIZE_MISSING_URL,
+                    payload: {},
+                    triggerBtn: queueSummarizeMissingBtn,
+                    label: "all missing summaries",
+                },
+            });
         });
     }
     if (askAiClose) askAiClose.addEventListener("click", closeAskAiModal);
@@ -3277,6 +3421,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentSummarizeName = null;
     let currentSummarizeMode = "single";
     let currentSummarizeNames = [];
+    let currentSummarizeQueue = null;
 
     function closePromptPicker() {
         hide(promptBackdrop);
@@ -3295,6 +3440,7 @@ document.addEventListener("DOMContentLoaded", () => {
         currentSummarizeName = name;
         currentSummarizeMode = options.mode || "single";
         currentSummarizeNames = options.names || [];
+        currentSummarizeQueue = options.queue || null;
         promptName.textContent = name;
         show(promptLoading);
         hide(promptList);
@@ -3402,6 +3548,15 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (currentSummarizeMode === "selected") {
             await runBulkSummarization({ promptId, names: currentSummarizeNames });
+            return;
+        }
+        if (currentSummarizeMode === "queue" && currentSummarizeQueue) {
+            await enqueueProcessingJob({
+                url: currentSummarizeQueue.url,
+                payload: { ...currentSummarizeQueue.payload, prompt_id: promptId },
+                triggerBtn: currentSummarizeQueue.triggerBtn,
+                label: currentSummarizeQueue.label,
+            });
             return;
         }
 

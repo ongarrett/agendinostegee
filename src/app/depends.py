@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from controllers.ActionCenterController import ActionCenterController
 from controllers.CalendarController import CalendarController
 from controllers.DashboardController import DashboardController
+from controllers.ProcessingQueueController import ProcessingQueueController
 from controllers.ProactorController import ProactorController
 from controllers.RAGController import RAGController
 from repositories.LocalRecordingsRepository import LocalRecordingsRepository
@@ -15,6 +16,7 @@ from repositories.SqliteDBRepository import SqliteDBRepository
 from repositories.SystemPromptsRepository import SystemPromptsRepository
 from repositories.VectorStoreRepository import VectorStoreRepository
 from services.NotionService import NotionService
+from services.ProcessingQueueService import ProcessingQueueService
 from services.RAGService import RAGService
 from services.SummarizationService import SummarizationService
 from services.TaskGenerationService import TaskGenerationService
@@ -215,6 +217,20 @@ def get_action_center_controller() -> ActionCenterController:
     return ActionCenterController(
         template_path=get_template_path(),
         auth_enabled=is_auth_enabled(),
+    )
+
+
+def get_processing_queue_controller() -> ProcessingQueueController:
+    return ProcessingQueueController(
+        template_path=get_template_path(),
+        auth_enabled=is_auth_enabled(),
+    )
+
+
+def get_processing_queue_service() -> ProcessingQueueService:
+    return ProcessingQueueService(
+        sqlite_db_repository=get_sqlite_db_repository(),
+        dashboard_controller=get_dashboard_controller(),
     )
 
 

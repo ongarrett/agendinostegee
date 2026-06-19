@@ -241,6 +241,43 @@
     }
 }
 
+.batch-actions-menu {
+    position: relative;
+}
+
+.batch-actions-menu summary {
+    list-style: none;
+}
+
+.batch-actions-menu summary::-webkit-details-marker {
+    display: none;
+}
+
+.batch-actions-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.25rem);
+    z-index: 1100;
+    min-width: 260px;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 8px;
+    background: var(--bs-body-bg);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+@media (max-width: 768px) {
+    .batch-actions-menu,
+    .batch-actions-menu summary {
+        width: 100%;
+    }
+
+    .batch-actions-panel {
+        left: 0;
+        right: auto;
+        width: 100%;
+    }
+}
+
 /* Prompt picker buttons */
 .prompt-category {
     border-bottom: 1px solid var(--bs-border-color);

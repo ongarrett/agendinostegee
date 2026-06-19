@@ -188,6 +188,42 @@
                                                         type="button" title="Generate summaries for recordings that have transcripts but no summaries">
                                                     <i class="bi bi-stars me-1"></i>Generate Missing Summaries
                                                 </button>
+                                                <details class="batch-actions-menu">
+                                                    <summary class="btn btn-sm btn-outline-dark"
+                                                             title="Queue batch transcription and summary jobs">
+                                                        <i class="bi bi-hourglass-split me-1"></i>Batch
+                                                    </summary>
+                                                    <div class="batch-actions-panel p-2">
+                                                        <h6 class="dropdown-header">Transcription</h6>
+                                                        <button class="dropdown-item" type="button" id="btn-queue-transcribe-25">
+                                                            Transcribe Newest 25
+                                                        </button>
+                                                        <button class="dropdown-item" type="button" id="btn-queue-transcribe-50">
+                                                            Transcribe Newest 50
+                                                        </button>
+                                                        <button class="dropdown-item" type="button" id="btn-queue-transcribe-collection">
+                                                            Transcribe Collection
+                                                        </button>
+                                                        <div class="dropdown-divider"></div>
+                                                        <h6 class="dropdown-header">Summaries</h6>
+                                                        <button class="dropdown-item" type="button" id="btn-queue-summarize-25">
+                                                            Summarize Newest 25
+                                                        </button>
+                                                        <button class="dropdown-item" type="button" id="btn-queue-summarize-50">
+                                                            Summarize Newest 50
+                                                        </button>
+                                                        <button class="dropdown-item" type="button" id="btn-queue-summarize-collection">
+                                                            Summarize Collection
+                                                        </button>
+                                                        <button class="dropdown-item" type="button" id="btn-queue-summarize-missing">
+                                                            Summarize Missing
+                                                        </button>
+                                                        <div class="dropdown-divider"></div>
+                                                        <a class="dropdown-item" href="/processing-queue">
+                                                            Open Processing Queue
+                                                        </a>
+                                                    </div>
+                                                </details>
                                                 <span id="recording-filter-count" class="small text-muted ms-auto"></span>
                                             </div>
                                             <div id="loading" class="text-center p-4">

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Processing Queue{% endblock %}
+{% block page_header %}Processing Queue{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="/static/processing_queue.css">
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+                <div>
+                    <h5 class="mb-0">Batch Processing</h5>
+                    <div class="text-muted small">Queued transcription and summary jobs run through existing AgenDino workflows.</div>
+                </div>
+                <div class="ms-auto d-flex flex-wrap gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" id="queue-refresh-btn">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" id="queue-process-next-btn">
+                        <i class="bi bi-play-fill me-1"></i>Process Next
+                    </button>
+                    <button class="btn btn-sm btn-primary" id="queue-resume-btn">
+                        <i class="bi bi-skip-forward-fill me-1"></i>Resume Pending
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="queue-alert" class="alert d-none" role="alert"></div>
+                <div class="queue-counts" id="queue-counts">
+                    <div class="queue-count-card">
+                        <span class="label">Pending</span>
+                        <strong id="queue-count-pending">0</strong>
+                    </div>
+                    <div class="queue-count-card">
+                        <span class="label">Running</span>
+                        <strong id="queue-count-running">0</strong>
+                    </div>
+                    <div class="queue-count-card">
+                        <span class="label">Completed</span>
+                        <strong id="queue-count-completed">0</strong>
+                    </div>
+                    <div class="queue-count-card">
+                        <span class="label">Failed</span>
+                        <strong id="queue-count-failed">0</strong>
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2 align-items-center mt-3 mb-2">
+                    <label class="small text-muted fw-semibold" for="queue-status-filter">Status</label>
+                    <select class="form-select form-select-sm queue-filter" id="queue-status-filter">
+                        <option value="">All</option>
+                        <option value="pending">Pending</option>
+                        <option value="running">Running</option>
+                        <option value="completed">Completed</option>
+                        <option value="failed">Failed</option>
+                    </select>
+                </div>
+                <div id="queue-loading" class="text-center p-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading…</span>
+                    </div>
+                </div>
+                <div id="queue-empty" class="text-center text-muted p-4 d-none">
+                    <i class="bi bi-inbox" style="font-size: 2.5rem;"></i>
+                    <p class="mt-2 mb-0">No queued jobs yet.</p>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle d-none" id="queue-table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Type</th>
+                                <th>Recording</th>
+                                <th>Provider / Prompt</th>
+                                <th>Attempts</th>
+                                <th>Updated</th>
+                                <th>Error</th>
+                            </tr>
+                        </thead>
+                        <tbody id="queue-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="/static/processing_queue.js"></script>
+{% endblock %}

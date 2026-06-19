@@ -21,6 +21,7 @@ class SqliteDBRepository:
         self._ensure_saved_view_tables()
         self._ensure_embedding_tables()
         self._ensure_action_center_tables()
+        self._ensure_processing_queue_tables()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -175,6 +176,41 @@ class SqliteDBRepository:
                     ON action_center_item (status);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_action_center_item_unique_source
                     ON action_center_item (recording_id, item_type, text, source_hash);
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _ensure_processing_queue_tables(self) -> None:
+        """Migration: add processing queue tables for existing local databases."""
+        conn = self._connect()
+        try:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS processing_queue
+                (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_type        TEXT    NOT NULL,
+                    recording_id    INTEGER NOT NULL,
+                    recording_name  TEXT    NOT NULL,
+                    recording_title TEXT    DEFAULT NULL,
+                    status          TEXT    NOT NULL DEFAULT 'pending',
+                    engine          TEXT    DEFAULT NULL,
+                    prompt_id       TEXT    DEFAULT NULL,
+                    error           TEXT    DEFAULT NULL,
+                    attempts        INTEGER NOT NULL DEFAULT 0,
+                    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+                    updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+                    started_at      TEXT    DEFAULT NULL,
+                    completed_at    TEXT    DEFAULT NULL,
+                    FOREIGN KEY (recording_id) REFERENCES recording (id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_processing_queue_status
+                    ON processing_queue (status);
+                CREATE INDEX IF NOT EXISTS idx_processing_queue_type_status
+                    ON processing_queue (job_type, status);
+                CREATE INDEX IF NOT EXISTS idx_processing_queue_recording
+                    ON processing_queue (recording_id);
             """)
             conn.commit()
         finally:
@@ -2213,5 +2249,286 @@ class SqliteDBRepository:
                 (error, calendar_id),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    # ─── Processing Queue ─────────────────────────────────────────
+
+    @staticmethod
+    def _processing_job_from_row(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "job_type": row["job_type"],
+            "recording_id": row["recording_id"],
+            "recording_name": row["recording_name"],
+            "recording_title": row["recording_title"],
+            "status": row["status"],
+            "engine": row["engine"],
+            "prompt_id": row["prompt_id"],
+            "error": row["error"],
+            "attempts": row["attempts"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+        }
+
+    def list_processing_queue_jobs(self, status: str = "") -> list[dict]:
+        conn = self._connect()
+        try:
+            params: list[str] = []
+            where = ""
+            if status:
+                where = "WHERE pq.status = ?"
+                params.append(status)
+            rows = conn.execute(
+                f"""
+                SELECT pq.*
+                FROM processing_queue pq
+                {where}
+                ORDER BY
+                    CASE pq.status
+                        WHEN 'running' THEN 0
+                        WHEN 'pending' THEN 1
+                        WHEN 'failed' THEN 2
+                        ELSE 3
+                    END,
+                    pq.created_at ASC,
+                    pq.id ASC
+                """,
+                params,
+            ).fetchall()
+            return [self._processing_job_from_row(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_processing_queue_counts(self) -> dict:
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT status, COUNT(*) AS count
+                FROM processing_queue
+                GROUP BY status
+            """).fetchall()
+            counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0}
+            for row in rows:
+                counts[row["status"]] = int(row["count"])
+            counts["total"] = sum(counts.values())
+            return counts
+        finally:
+            conn.close()
+
+    def enqueue_processing_jobs(
+        self,
+        job_type: str,
+        names: list[str],
+        engine: str | None = None,
+        prompt_id: str | None = None,
+    ) -> dict:
+        conn = self._connect()
+        try:
+            enqueued = []
+            skipped = []
+            failed = []
+            seen = set()
+            for name in names:
+                clean_name = (name or "").strip()
+                if not clean_name or clean_name in seen:
+                    continue
+                seen.add(clean_name)
+                rec = conn.execute(
+                    """
+                    SELECT
+                        r.id,
+                        r.name,
+                        COALESCE(
+                            NULLIF((
+                                SELECT s.title
+                                FROM summary s
+                                WHERE s.recording_id = r.id
+                                ORDER BY s.version DESC
+                                LIMIT 1
+                            ), ''),
+                            NULLIF(r.label, ''),
+                            r.name
+                        ) AS recording_title
+                    FROM recording r
+                    WHERE r.name = ?
+                    """,
+                    (clean_name,),
+                ).fetchone()
+                if not rec:
+                    failed.append({"name": clean_name, "error": "Recording not found"})
+                    continue
+
+                active = conn.execute(
+                    """
+                    SELECT id, status
+                    FROM processing_queue
+                    WHERE job_type = ?
+                      AND recording_id = ?
+                      AND COALESCE(engine, '') = COALESCE(?, '')
+                      AND COALESCE(prompt_id, '') = COALESCE(?, '')
+                      AND status IN ('pending', 'running')
+                    LIMIT 1
+                    """,
+                    (job_type, rec["id"], engine, prompt_id),
+                ).fetchone()
+                if active:
+                    skipped.append({"name": clean_name, "status": active["status"], "job_id": active["id"]})
+                    continue
+
+                result = conn.execute(
+                    """
+                    INSERT INTO processing_queue
+                        (job_type, recording_id, recording_name, recording_title, status, engine, prompt_id)
+                    VALUES (?, ?, ?, ?, 'pending', ?, ?)
+                    """,
+                    (job_type, rec["id"], rec["name"], rec["recording_title"], engine, prompt_id),
+                )
+                enqueued.append({"name": clean_name, "job_id": int(result.lastrowid)})
+            conn.commit()
+            return {
+                "ok": len(failed) == 0,
+                "counts": {
+                    "enqueued": len(enqueued),
+                    "skipped_active": len(skipped),
+                    "failed": len(failed),
+                },
+                "enqueued": enqueued,
+                "skipped": skipped,
+                "failed": failed,
+            }
+        finally:
+            conn.close()
+
+    def claim_next_processing_queue_job(self) -> dict | None:
+        conn = self._connect()
+        try:
+            row = conn.execute("""
+                SELECT *
+                FROM processing_queue
+                WHERE status = 'pending'
+                ORDER BY created_at ASC, id ASC
+                LIMIT 1
+                """).fetchone()
+            if not row:
+                return None
+            conn.execute(
+                """
+                UPDATE processing_queue
+                SET status = 'running',
+                    attempts = attempts + 1,
+                    error = NULL,
+                    started_at = datetime('now'),
+                    updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (row["id"],),
+            )
+            conn.commit()
+            updated = conn.execute("SELECT * FROM processing_queue WHERE id = ?", (row["id"],)).fetchone()
+            return self._processing_job_from_row(updated)
+        finally:
+            conn.close()
+
+    def update_processing_queue_job_status(self, job_id: int, status: str, error: str | None = None) -> dict | None:
+        conn = self._connect()
+        try:
+            completed_expr = "datetime('now')" if status in ("completed", "failed") else "completed_at"
+            conn.execute(
+                f"""
+                UPDATE processing_queue
+                SET status = ?,
+                    error = ?,
+                    completed_at = {completed_expr},
+                    updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (status, error, job_id),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM processing_queue WHERE id = ?", (job_id,)).fetchone()
+            return self._processing_job_from_row(row) if row else None
+        finally:
+            conn.close()
+
+    def reset_running_processing_jobs(self) -> int:
+        conn = self._connect()
+        try:
+            result = conn.execute("""
+                UPDATE processing_queue
+                SET status = 'pending',
+                    updated_at = datetime('now')
+                WHERE status = 'running'
+                """)
+            conn.commit()
+            return result.rowcount
+        finally:
+            conn.close()
+
+    def get_untranscribed_recording_names(
+        self, limit: int | None = None, collection_id: int | None = None
+    ) -> list[str]:
+        conn = self._connect()
+        try:
+            params: list[object] = []
+            collection_join = ""
+            collection_where = ""
+            if collection_id is not None:
+                collection_join = "JOIN recording_collection rc ON rc.recording_id = r.id"
+                collection_where = "AND rc.collection_id = ?"
+                params.append(collection_id)
+            params.append(limit if limit is not None else -1)
+            rows = conn.execute(
+                f"""
+                SELECT r.name
+                FROM recording r
+                {collection_join}
+                WHERE (r.transcript IS NULL OR trim(r.transcript) = '')
+                  {collection_where}
+                ORDER BY COALESCE(r.recorded_at, r.created_at) DESC, r.id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            return [row["name"] for row in rows]
+        finally:
+            conn.close()
+
+    def get_missing_summary_recording_names(
+        self,
+        limit: int | None = None,
+        collection_id: int | None = None,
+    ) -> list[str]:
+        conn = self._connect()
+        try:
+            params: list[object] = []
+            collection_join = ""
+            collection_where = ""
+            if collection_id is not None:
+                collection_join = "JOIN recording_collection rc ON rc.recording_id = r.id"
+                collection_where = "AND rc.collection_id = ?"
+                params.append(collection_id)
+            params.append(limit if limit is not None else -1)
+            rows = conn.execute(
+                f"""
+                SELECT r.name
+                FROM recording r
+                {collection_join}
+                WHERE r.transcript IS NOT NULL
+                  AND trim(r.transcript) != ''
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM summary s
+                      WHERE s.recording_id = r.id
+                  )
+                  {collection_where}
+                ORDER BY COALESCE(r.recorded_at, r.created_at) DESC, r.id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            return [row["name"] for row in rows]
         finally:
             conn.close()

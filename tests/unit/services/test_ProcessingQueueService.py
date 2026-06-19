@@ -1,0 +1,142 @@
+from datetime import datetime, timedelta
+
+import pytest
+
+from models.DBRecording import DBRecording
+from repositories.SqliteDBRepository import SqliteDBRepository
+from services.ProcessingQueueService import ProcessingQueueService
+
+
+class FakeDashboardController:
+    def __init__(self):
+        self.transcribed = []
+        self.summarized = []
+        self.fail_transcribe = set()
+        self.fail_summarize = set()
+
+    def transcribe_recording(self, name, engine="whisper"):
+        self.transcribed.append({"name": name, "engine": engine})
+        if name in self.fail_transcribe:
+            return {"ok": False, "error": "Transcription failed"}
+        return {"ok": True, "transcript": "Transcript"}
+
+    def summarize_recording(self, name, prompt_id):
+        self.summarized.append({"name": name, "prompt_id": prompt_id})
+        if name in self.fail_summarize:
+            return {"ok": False, "error": "Summarization failed"}
+        return {"ok": True, "summary_id": 1, "version": 1}
+
+
+@pytest.fixture
+def queue_db(tmp_path):
+    return SqliteDBRepository(
+        "processing_queue_test.db",
+        str(tmp_path),
+        "settings/db_init.sql",
+    )
+
+
+def insert_recording(db, name, days_old=0, transcript=None, summary=None):
+    db.insert_recording(
+        DBRecording(
+            id=None,
+            name=name,
+            label=name,
+            duration=10,
+            created_at=datetime.now() - timedelta(days=days_old),
+            transcript=transcript,
+        )
+    )
+    if summary:
+        db.save_summarization_result(name, title=f"{name} title", tags="", summary=summary)
+
+
+def test_enqueue_transcribe_newest_uses_whisper_and_limits_untranscribed(queue_db):
+    insert_recording(queue_db, "old", days_old=2)
+    insert_recording(queue_db, "new", days_old=0)
+    insert_recording(queue_db, "already-transcribed", transcript="Done")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    result = service.enqueue_transcribe_newest(limit=1)
+    jobs = service.list_jobs()["jobs"]
+
+    assert result["counts"]["enqueued"] == 1
+    assert jobs[0]["recording_name"] == "new"
+    assert jobs[0]["engine"] == "whisper"
+
+
+def test_enqueue_summarize_newest_selects_transcribed_missing_summary(queue_db):
+    insert_recording(queue_db, "missing-summary", transcript="Transcript")
+    insert_recording(queue_db, "has-summary", transcript="Transcript", summary="Summary")
+    insert_recording(queue_db, "no-transcript")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    result = service.enqueue_summarize_newest(limit=25, prompt_id="en/general/Brief")
+    jobs = service.list_jobs()["jobs"]
+
+    assert result["counts"]["enqueued"] == 1
+    assert jobs[0]["recording_name"] == "missing-summary"
+    assert jobs[0]["prompt_id"] == "en/general/Brief"
+
+
+def test_collection_transcription_is_scoped_to_collection(queue_db):
+    insert_recording(queue_db, "in-collection")
+    insert_recording(queue_db, "outside")
+    collection = queue_db.create_collection("Strategy")
+    queue_db.add_recording_to_collection("in-collection", collection["id"])
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    result = service.enqueue_transcribe_collection(collection["id"])
+    jobs = service.list_jobs()["jobs"]
+
+    assert result["counts"]["enqueued"] == 1
+    assert jobs[0]["recording_name"] == "in-collection"
+
+
+def test_duplicate_pending_jobs_are_skipped(queue_db):
+    insert_recording(queue_db, "alpha")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    first = service.enqueue_transcribe_newest(limit=25)
+    second = service.enqueue_transcribe_newest(limit=25)
+
+    assert first["counts"]["enqueued"] == 1
+    assert second["counts"]["enqueued"] == 0
+    assert second["counts"]["skipped_active"] == 1
+
+
+def test_process_next_updates_completed_and_failed_statuses(queue_db):
+    insert_recording(queue_db, "ok")
+    insert_recording(queue_db, "bad")
+    dashboard = FakeDashboardController()
+    dashboard.fail_transcribe.add("bad")
+    service = ProcessingQueueService(queue_db, dashboard)
+    queue_db.enqueue_processing_jobs("transcribe", ["ok", "bad"], engine="whisper")
+
+    result = service.process_next(max_jobs=2)
+    jobs = service.list_jobs()["jobs"]
+
+    assert result["counts"] == {"completed": 1, "failed": 1}
+    assert {job["recording_name"]: job["status"] for job in jobs} == {
+        "ok": "completed",
+        "bad": "failed",
+    }
+    assert dashboard.transcribed == [
+        {"name": "ok", "engine": "whisper"},
+        {"name": "bad", "engine": "whisper"},
+    ]
+
+
+def test_resume_resets_running_jobs_before_processing(queue_db):
+    insert_recording(queue_db, "alpha")
+    dashboard = FakeDashboardController()
+    service = ProcessingQueueService(queue_db, dashboard)
+    queue_db.enqueue_processing_jobs("transcribe", ["alpha"], engine="whisper")
+    claimed = queue_db.claim_next_processing_queue_job()
+
+    assert claimed["status"] == "running"
+
+    result = service.process_next(max_jobs=1, reset_running=True)
+
+    assert result["counts"]["completed"] == 1
+    assert service.list_jobs()["jobs"][0]["status"] == "completed"

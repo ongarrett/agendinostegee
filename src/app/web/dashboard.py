@@ -5,6 +5,7 @@ from app import depends
 from controllers.ActionCenterController import ActionCenterController
 from controllers.CalendarController import CalendarController
 from controllers.DashboardController import DashboardController
+from controllers.ProcessingQueueController import ProcessingQueueController
 from controllers.ProactorController import ProactorController
 
 router = APIRouter()
@@ -35,3 +36,11 @@ def action_center_home(
     action_center_controller: ActionCenterController = Depends(depends.get_action_center_controller),
 ):
     return action_center_controller.action_center_home(request)
+
+
+@router.get("/processing-queue", response_class=HTMLResponse)
+def processing_queue_home(
+    request: Request,
+    processing_queue_controller: ProcessingQueueController = Depends(depends.get_processing_queue_controller),
+):
+    return processing_queue_controller.processing_queue_home(request)

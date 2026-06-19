@@ -122,6 +122,29 @@ CREATE INDEX IF NOT EXISTS idx_action_center_item_status ON action_center_item (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_action_center_item_unique_source
     ON action_center_item (recording_id, item_type, text, source_hash);
 
+CREATE TABLE IF NOT EXISTS processing_queue
+(
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_type        TEXT    NOT NULL,
+    recording_id    INTEGER NOT NULL,
+    recording_name  TEXT    NOT NULL,
+    recording_title TEXT    DEFAULT NULL,
+    status          TEXT    NOT NULL DEFAULT 'pending',
+    engine          TEXT    DEFAULT NULL,
+    prompt_id       TEXT    DEFAULT NULL,
+    error           TEXT    DEFAULT NULL,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    started_at      TEXT    DEFAULT NULL,
+    completed_at    TEXT    DEFAULT NULL,
+    FOREIGN KEY (recording_id) REFERENCES recording (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_queue_status ON processing_queue (status);
+CREATE INDEX IF NOT EXISTS idx_processing_queue_type_status ON processing_queue (job_type, status);
+CREATE INDEX IF NOT EXISTS idx_processing_queue_recording ON processing_queue (recording_id);
+
 CREATE TABLE IF NOT EXISTS shared_calendar
 (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
