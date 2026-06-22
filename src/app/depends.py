@@ -16,6 +16,7 @@ from repositories.SqliteDBRepository import SqliteDBRepository
 from repositories.SystemPromptsRepository import SystemPromptsRepository
 from repositories.VectorStoreRepository import VectorStoreRepository
 from services.NotionService import NotionService
+from services.OllamaSummarizationService import OllamaSummarizationService
 from services.ProcessingQueueService import ProcessingQueueService
 from services.RAGService import RAGService
 from services.SummarizationService import SummarizationService
@@ -49,6 +50,9 @@ DEFAULT_CONFIG = {
     "WHISPER_MODEL_SIZE": "small",
     "WHISPER_DEVICE": "cpu",
     "WHISPER_COMPUTE_TYPE": "auto",
+    "SUMMARY_PROVIDER": "gemini",
+    "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
+    "OLLAMA_SUMMARY_MODEL": "llama3.1",
     "AUTH_ENABLED": "false",
     "AUTH_SECRET_KEY": "your-secret-key-here",
 }
@@ -148,6 +152,14 @@ def get_summarization_service() -> SummarizationService:
     return SummarizationService(api_key=get_gemini_api_key(), model=_config["GEMINI_MODEL"])
 
 
+def get_ollama_summarization_service() -> OllamaSummarizationService:
+    _config = get_config()
+    return OllamaSummarizationService(
+        base_url=_config["OLLAMA_BASE_URL"],
+        model=_config["OLLAMA_SUMMARY_MODEL"],
+    )
+
+
 def get_task_generation_service() -> TaskGenerationService:
     _config = get_config()
     return TaskGenerationService(api_key=get_gemini_api_key(), model=_config["GEMINI_MODEL"])
@@ -180,6 +192,7 @@ def get_daily_recap_service() -> DailyRecapService:
 
 
 def get_dashboard_controller() -> DashboardController:
+    _config = get_config()
     return DashboardController(
         sqlite_db_repository=get_sqlite_db_repository(),
         local_recordings_repository=get_local_recordings_repository(),
@@ -190,6 +203,9 @@ def get_dashboard_controller() -> DashboardController:
         template_path=get_template_path(),
         publish_services=_build_publish_services(),
         whisper_transcription_service=get_whisper_transcription_service(),
+        ollama_summarization_service=get_ollama_summarization_service(),
+        default_summary_provider=_config["SUMMARY_PROVIDER"],
+        default_ollama_summary_model=_config["OLLAMA_SUMMARY_MODEL"],
         auth_enabled=is_auth_enabled(),
     )
 

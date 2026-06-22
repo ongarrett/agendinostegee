@@ -195,6 +195,8 @@ class SqliteDBRepository:
                     recording_title TEXT    DEFAULT NULL,
                     status          TEXT    NOT NULL DEFAULT 'pending',
                     engine          TEXT    DEFAULT NULL,
+                    summary_provider TEXT   DEFAULT NULL,
+                    summary_model   TEXT    DEFAULT NULL,
                     prompt_id       TEXT    DEFAULT NULL,
                     error           TEXT    DEFAULT NULL,
                     attempts        INTEGER NOT NULL DEFAULT 0,
@@ -212,9 +214,17 @@ class SqliteDBRepository:
                 CREATE INDEX IF NOT EXISTS idx_processing_queue_recording
                     ON processing_queue (recording_id);
             """)
+            self._ensure_column(conn, "processing_queue", "summary_provider", "TEXT DEFAULT NULL")
+            self._ensure_column(conn, "processing_queue", "summary_model", "TEXT DEFAULT NULL")
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        columns = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def get_recordings(self) -> list[DBRecording]:
         conn = self._connect()
@@ -2264,6 +2274,8 @@ class SqliteDBRepository:
             "recording_title": row["recording_title"],
             "status": row["status"],
             "engine": row["engine"],
+            "summary_provider": row["summary_provider"],
+            "summary_model": row["summary_model"],
             "prompt_id": row["prompt_id"],
             "error": row["error"],
             "attempts": row["attempts"],
@@ -2323,6 +2335,8 @@ class SqliteDBRepository:
         job_type: str,
         names: list[str],
         engine: str | None = None,
+        summary_provider: str | None = None,
+        summary_model: str | None = None,
         prompt_id: str | None = None,
     ) -> dict:
         conn = self._connect()
@@ -2368,11 +2382,13 @@ class SqliteDBRepository:
                     WHERE job_type = ?
                       AND recording_id = ?
                       AND COALESCE(engine, '') = COALESCE(?, '')
+                      AND COALESCE(summary_provider, '') = COALESCE(?, '')
+                      AND COALESCE(summary_model, '') = COALESCE(?, '')
                       AND COALESCE(prompt_id, '') = COALESCE(?, '')
                       AND status IN ('pending', 'running')
                     LIMIT 1
                     """,
-                    (job_type, rec["id"], engine, prompt_id),
+                    (job_type, rec["id"], engine, summary_provider, summary_model, prompt_id),
                 ).fetchone()
                 if active:
                     skipped.append({"name": clean_name, "status": active["status"], "job_id": active["id"]})
@@ -2381,10 +2397,29 @@ class SqliteDBRepository:
                 result = conn.execute(
                     """
                     INSERT INTO processing_queue
-                        (job_type, recording_id, recording_name, recording_title, status, engine, prompt_id)
-                    VALUES (?, ?, ?, ?, 'pending', ?, ?)
+                        (
+                            job_type,
+                            recording_id,
+                            recording_name,
+                            recording_title,
+                            status,
+                            engine,
+                            summary_provider,
+                            summary_model,
+                            prompt_id
+                        )
+                    VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)
                     """,
-                    (job_type, rec["id"], rec["name"], rec["recording_title"], engine, prompt_id),
+                    (
+                        job_type,
+                        rec["id"],
+                        rec["name"],
+                        rec["recording_title"],
+                        engine,
+                        summary_provider,
+                        summary_model,
+                        prompt_id,
+                    ),
                 )
                 enqueued.append({"name": clean_name, "job_id": int(result.lastrowid)})
             conn.commit()

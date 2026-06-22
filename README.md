@@ -3,7 +3,7 @@
 [![Tests](https://github.com/DStt/agendino/actions/workflows/tests.yml/badge.svg)](https://github.com/DStt/agendino/actions/workflows/tests.yml)
 [![Style](https://github.com/DStt/agendino/actions/workflows/style.yml/badge.svg)](https://github.com/DStt/agendino/actions/workflows/style.yml)
 
-AgenDino is a web-based dashboard for managing, transcribing, and summarizing audio recordings from [HiDock](https://www.hidock.com/) USB devices. It uses Google Gemini and local Whisper for AI-powered transcription, summarization, task extraction, and knowledge retrieval - all from a single self-hosted interface.
+AgenDino is a web-based dashboard for managing, transcribing, and summarizing audio recordings from [HiDock](https://www.hidock.com/) USB devices. It uses Google Gemini, local Whisper, and optional local Ollama models for AI-powered transcription, summarization, task extraction, and knowledge retrieval - all from a single self-hosted interface.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
@@ -14,7 +14,7 @@ AgenDino is a web-based dashboard for managing, transcribing, and summarizing au
 | [HiDock USB Integration](docs/hidock-integration.md) | Detect, sync, and manage recordings from HiDock H1 / H1E / P1 devices |
 | [Recording Management](docs/recording-management.md) | Upload, organize with folders, play back, and delete audio files |
 | [AI Transcription](docs/transcription.md) | Cloud (Gemini) and local (Whisper) speech-to-text with speaker diarization |
-| [AI Summarization](docs/summarization.md) | Structured summaries with customizable system prompts and multiple versions |
+| [AI Summarization](docs/summarization.md) | Structured summaries with Gemini or local Ollama models, customizable prompts, and multiple versions |
 | [Task Generation](docs/task-generation.md) | Extract Jira-style tasks and subtasks from meeting summaries |
 | [Calendar](docs/calendar.md) | Manual events, iCal subscriptions (Google Calendar, Outlook), recording linking |
 | [Daily Recap](docs/daily-recap.md) | AI-generated end-of-day narrative from events and meetings |
@@ -49,6 +49,24 @@ fastapi dev main.py
 Open **http://127.0.0.1:8000** in your browser.
 
 → Full setup guide: [Getting Started](docs/getting-started.md)
+
+### Optional Local Summaries With Ollama
+
+Install and start [Ollama](https://ollama.com/), then pull one or more supported models:
+
+```bash
+ollama pull llama3.1
+ollama pull qwen3
+ollama pull mistral
+```
+
+In the summarization prompt picker, choose **Local AI (Ollama)** and select `llama3.1`, `qwen3`, or `mistral`. Optional `.env` settings:
+
+```env
+SUMMARY_PROVIDER=gemini
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_SUMMARY_MODEL=llama3.1
+```
 
 ## Private Remote Access With Tailscale
 

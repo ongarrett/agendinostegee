@@ -250,6 +250,8 @@ async def summarize_selected_recordings(
         body.prompt_id,
         rate_limit_delay_seconds=body.rate_limit_delay_seconds,
         max_retries=body.max_retries,
+        summary_provider=body.summary_provider,
+        summary_model=body.summary_model,
     )
 
 
@@ -262,6 +264,8 @@ async def summarize_missing_summaries(
         body.prompt_id,
         rate_limit_delay_seconds=body.rate_limit_delay_seconds,
         max_retries=body.max_retries,
+        summary_provider=body.summary_provider,
+        summary_model=body.summary_model,
     )
 
 
@@ -271,7 +275,12 @@ async def summarize_recording(
     body: SummarizeRequestDTO,
     dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
 ):
-    return dashboard_controller.summarize_recording(name, body.prompt_id)
+    return dashboard_controller.summarize_recording(
+        name,
+        body.prompt_id,
+        summary_provider=body.summary_provider,
+        summary_model=body.summary_model,
+    )
 
 
 @router.get("/summaries/{name}")

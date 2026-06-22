@@ -1,6 +1,6 @@
 # Summarization
 
-Generate structured AI summaries from transcripts using Google Gemini with customizable system prompts.
+Generate structured AI summaries from transcripts using Google Gemini or local Ollama models with customizable system prompts.
 
 ![Summarization](screenshots/summarization.png)
 
@@ -8,17 +8,40 @@ Generate structured AI summaries from transcripts using Google Gemini with custo
 
 ## Overview
 
-Once a recording has been transcribed, you can generate a structured summary using Gemini. Summaries include a **title**, **tags**, and a **full markdown body**. You can create multiple summary versions per recording using different system prompts.
+Once a recording has been transcribed, you can generate a structured summary using Gemini or local AI through Ollama. Summaries include a **title**, **tags**, and a **full markdown body**. You can create multiple summary versions per recording using different system prompts.
 
 ## How It Works
 
 1. Make sure the recording has been transcribed first.
-2. Click **Summarize** and choose a **system prompt** from the available categories (e.g. `Generale / SintesiAdattiva`, `IT&Engineering / VerbaleIT`).
-3. Gemini generates a structured JSON response containing:
+2. Click **Summarize** and choose a summary provider:
+   - **Gemini** for cloud generation.
+   - **Local AI (Ollama)** for local generation with `llama3.1`, `qwen3`, or `mistral`.
+3. Choose a **system prompt** from the available categories (e.g. `Generale / SintesiAdattiva`, `IT&Engineering / VerbaleIT`).
+4. The selected provider generates a structured JSON response containing:
    - **Title** - a concise summary title.
    - **Tags** - relevant keywords for categorization.
    - **Summary** - full markdown content with sections, bullet points, and structure defined by the prompt.
-4. The result is saved to the database.
+5. The result is saved to the database using the same summary version format.
+
+## Local Ollama Setup
+
+Install and start Ollama, then pull at least one supported model:
+
+```bash
+ollama pull llama3.1
+ollama pull qwen3
+ollama pull mistral
+```
+
+Optional `.env` settings:
+
+```env
+SUMMARY_PROVIDER=gemini
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_SUMMARY_MODEL=llama3.1
+```
+
+Local summary generation requires Ollama to be running at `OLLAMA_BASE_URL`. Batch summarization and queued summary jobs preserve the selected provider and model.
 
 ## Multiple Summary Versions
 

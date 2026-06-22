@@ -63,6 +63,11 @@ GEMINI_API_KEY=your-gemini-api-key
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_EMBEDDING_MODEL=text-embedding-001
 
+# Optional - Summary provider settings
+SUMMARY_PROVIDER=gemini              # gemini | local
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_SUMMARY_MODEL=llama3.1        # llama3.1 | qwen3 | mistral
+
 # Optional - Notion integration
 NOTION_API_KEY=your-notion-integration-token
 NOTION_PAGE_ID=your-notion-parent-page-id
@@ -80,6 +85,16 @@ WHISPER_COMPUTE_TYPE=auto         # auto | int8 | float16 | float32
 ```
 
 See [Authentication](authentication.md) for details on `AUTH_ENABLED` and [Transcription](transcription.md) for Whisper settings.
+
+For local summary generation, install Ollama, keep it running, and pull at least one supported model:
+
+```bash
+ollama pull llama3.1
+ollama pull qwen3
+ollama pull mistral
+```
+
+Then choose **Local AI (Ollama)** in the summary prompt picker.
 
 ## Running the Server
 

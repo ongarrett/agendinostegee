@@ -41,22 +41,53 @@ class ProcessingQueueService:
         limit: int,
         prompt_id: str,
         collection_id: int | None = None,
+        summary_provider: str = "gemini",
+        summary_model: str | None = None,
     ) -> dict:
         names = self._sqlite_db_repository.get_missing_summary_recording_names(
             limit=limit,
             collection_id=collection_id,
         )
-        result = self._sqlite_db_repository.enqueue_processing_jobs("summarize", names, prompt_id=prompt_id)
+        result = self._sqlite_db_repository.enqueue_processing_jobs(
+            "summarize",
+            names,
+            prompt_id=prompt_id,
+            summary_provider=summary_provider,
+            summary_model=summary_model,
+        )
         return self._with_selection_count(result, len(names))
 
-    def enqueue_summarize_collection(self, collection_id: int, prompt_id: str) -> dict:
+    def enqueue_summarize_collection(
+        self,
+        collection_id: int,
+        prompt_id: str,
+        summary_provider: str = "gemini",
+        summary_model: str | None = None,
+    ) -> dict:
         names = self._sqlite_db_repository.get_missing_summary_recording_names(collection_id=collection_id)
-        result = self._sqlite_db_repository.enqueue_processing_jobs("summarize", names, prompt_id=prompt_id)
+        result = self._sqlite_db_repository.enqueue_processing_jobs(
+            "summarize",
+            names,
+            prompt_id=prompt_id,
+            summary_provider=summary_provider,
+            summary_model=summary_model,
+        )
         return self._with_selection_count(result, len(names))
 
-    def enqueue_summarize_missing(self, prompt_id: str) -> dict:
+    def enqueue_summarize_missing(
+        self,
+        prompt_id: str,
+        summary_provider: str = "gemini",
+        summary_model: str | None = None,
+    ) -> dict:
         names = self._sqlite_db_repository.get_missing_summary_recording_names()
-        result = self._sqlite_db_repository.enqueue_processing_jobs("summarize", names, prompt_id=prompt_id)
+        result = self._sqlite_db_repository.enqueue_processing_jobs(
+            "summarize",
+            names,
+            prompt_id=prompt_id,
+            summary_provider=summary_provider,
+            summary_model=summary_model,
+        )
         return self._with_selection_count(result, len(names))
 
     @staticmethod
@@ -102,6 +133,8 @@ class ProcessingQueueService:
             result = self._dashboard_controller.summarize_recording(
                 job["recording_name"],
                 job["prompt_id"],
+                summary_provider=job.get("summary_provider"),
+                summary_model=job.get("summary_model"),
             )
         else:
             result = {"ok": False, "error": f"Unsupported job type '{job['job_type']}'"}

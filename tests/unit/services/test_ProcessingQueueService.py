@@ -20,8 +20,15 @@ class FakeDashboardController:
             return {"ok": False, "error": "Transcription failed"}
         return {"ok": True, "transcript": "Transcript"}
 
-    def summarize_recording(self, name, prompt_id):
-        self.summarized.append({"name": name, "prompt_id": prompt_id})
+    def summarize_recording(self, name, prompt_id, summary_provider=None, summary_model=None):
+        self.summarized.append(
+            {
+                "name": name,
+                "prompt_id": prompt_id,
+                "summary_provider": summary_provider,
+                "summary_model": summary_model,
+            }
+        )
         if name in self.fail_summarize:
             return {"ok": False, "error": "Summarization failed"}
         return {"ok": True, "summary_id": 1, "version": 1}
@@ -79,6 +86,23 @@ def test_enqueue_summarize_newest_selects_transcribed_missing_summary(queue_db):
     assert jobs[0]["prompt_id"] == "en/general/Brief"
 
 
+def test_enqueue_summarize_newest_persists_local_provider_and_model(queue_db):
+    insert_recording(queue_db, "missing-summary", transcript="Transcript")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    result = service.enqueue_summarize_newest(
+        limit=25,
+        prompt_id="en/general/Brief",
+        summary_provider="local",
+        summary_model="qwen3",
+    )
+    jobs = service.list_jobs()["jobs"]
+
+    assert result["counts"]["enqueued"] == 1
+    assert jobs[0]["summary_provider"] == "local"
+    assert jobs[0]["summary_model"] == "qwen3"
+
+
 def test_collection_transcription_is_scoped_to_collection(queue_db):
     insert_recording(queue_db, "in-collection")
     insert_recording(queue_db, "outside")
@@ -124,6 +148,31 @@ def test_process_next_updates_completed_and_failed_statuses(queue_db):
     assert dashboard.transcribed == [
         {"name": "ok", "engine": "whisper"},
         {"name": "bad", "engine": "whisper"},
+    ]
+
+
+def test_process_next_passes_summary_provider_and_model(queue_db):
+    insert_recording(queue_db, "alpha", transcript="Transcript")
+    dashboard = FakeDashboardController()
+    service = ProcessingQueueService(queue_db, dashboard)
+    queue_db.enqueue_processing_jobs(
+        "summarize",
+        ["alpha"],
+        prompt_id="prompt",
+        summary_provider="local",
+        summary_model="llama3.1",
+    )
+
+    result = service.process_next(max_jobs=1)
+
+    assert result["counts"]["completed"] == 1
+    assert dashboard.summarized == [
+        {
+            "name": "alpha",
+            "prompt_id": "prompt",
+            "summary_provider": "local",
+            "summary_model": "llama3.1",
+        }
     ]
 
 

@@ -22,6 +22,7 @@ def mock_services(tmp_path):
     task_generation_service = MagicMock()
     transcription_service = MagicMock()
     summarization_service = MagicMock()
+    ollama_summarization_service = MagicMock()
 
     controller = DashboardController(
         sqlite_db_repository=sqlite_db,
@@ -32,6 +33,7 @@ def mock_services(tmp_path):
         publish_services={},
         task_generation_service=task_generation_service,
         summarization_service=summarization_service,
+        ollama_summarization_service=ollama_summarization_service,
     )
 
     return {
@@ -40,6 +42,7 @@ def mock_services(tmp_path):
         "local_repo": local_repo,
         "transcription_service": transcription_service,
         "summarization_service": summarization_service,
+        "ollama_summarization_service": ollama_summarization_service,
         "system_prompts_repo": system_prompts_repo,
         "task_generation_service": task_generation_service,
     }
@@ -354,6 +357,30 @@ class TestDashboardControllerSummarizeRecording:
         result = ctrl.summarize_recording("test", "prompt_id")
         assert result["ok"] is False
         assert "Summarization failed" in result["error"]
+
+    def test_local_summarization_uses_ollama_service(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].get_transcript.return_value = "transcript text"
+        mock_services["system_prompts_repo"].get_prompt_content.return_value = "Be concise."
+        mock_services["ollama_summarization_service"].summarize.return_value = {
+            "title": "Local Title",
+            "tags": ["local"],
+            "summary": "Local summary",
+        }
+        mock_services["sqlite_db"].save_summarization_result.return_value = MagicMock(id=1, version=1)
+
+        result = ctrl.summarize_recording(
+            "test",
+            "prompt_id",
+            summary_provider="local",
+            summary_model="mistral",
+        )
+
+        assert result["ok"] is True
+        assert result["summary_provider"] == "local"
+        assert result["summary_model"] == "mistral"
+        mock_services["ollama_summarization_service"].summarize.assert_called_once()
+        mock_services["summarization_service"].summarize.assert_not_called()
 
     def test_list_missing_summaries_requires_transcript_and_no_summary(self, mock_services):
         ctrl = mock_services["controller"]

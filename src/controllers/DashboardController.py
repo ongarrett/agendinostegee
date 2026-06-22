@@ -16,6 +16,7 @@ from services.SummarizationService import SummarizationService
 from services.TaskGenerationService import TaskGenerationService
 from services.TranscriptionService import TranscriptionService
 from services.WhisperTranscriptionService import WhisperTranscriptionService
+from services.OllamaSummarizationService import OllamaSummarizationService
 
 MIME_TYPES = {
     "hda": "audio/mpeg",
@@ -42,6 +43,9 @@ class DashboardController:
         template_path: str,
         publish_services: dict[str, object] | None = None,
         whisper_transcription_service: WhisperTranscriptionService | None = None,
+        ollama_summarization_service: OllamaSummarizationService | None = None,
+        default_summary_provider: str = "gemini",
+        default_ollama_summary_model: str = "llama3.1",
         auth_enabled: bool = False,
     ):
         self._sqlite_db_repository = sqlite_db_repository
@@ -53,6 +57,9 @@ class DashboardController:
         self._templates = Jinja2Templates(directory=template_path)
         self._publish_services: dict[str, object] = publish_services or {}
         self._whisper_transcription_service = whisper_transcription_service
+        self._ollama_summarization_service = ollama_summarization_service
+        self._default_summary_provider = default_summary_provider
+        self._default_ollama_summary_model = default_ollama_summary_model
         self._auth_enabled = auth_enabled
 
     @staticmethod
@@ -470,7 +477,13 @@ class DashboardController:
         prompts = self._system_prompts_repository.get_all()
         return {"ok": True, "prompts": prompts}
 
-    def summarize_recording(self, name: str, prompt_id: str) -> dict:
+    def summarize_recording(
+        self,
+        name: str,
+        prompt_id: str,
+        summary_provider: str | None = None,
+        summary_model: str | None = None,
+    ) -> dict:
         bare_name = self._bare_name(name)
 
         transcript = self._sqlite_db_repository.get_transcript(bare_name)
@@ -482,10 +495,16 @@ class DashboardController:
             return {"ok": False, "error": f"System prompt '{prompt_id}' not found"}
 
         recording_datetime = self._parse_recording_datetime(bare_name)
+        provider = self._normalize_summary_provider(summary_provider)
+        model = summary_model or (self._default_ollama_summary_model if provider == "local" else None)
 
         try:
-            result = self._summarization_service.summarize(
-                transcript, prompt_content, recording_datetime=recording_datetime
+            result = self._summarize_with_provider(
+                provider,
+                transcript,
+                prompt_content,
+                recording_datetime=recording_datetime,
+                summary_model=model,
             )
         except Exception as e:
             return {"ok": False, "error": f"Summarization failed: {str(e)}"}
@@ -509,7 +528,38 @@ class DashboardController:
             "summary": summary,
             "title": title,
             "tags": tags,
+            "summary_provider": provider,
+            "summary_model": model,
         }
+
+    def _normalize_summary_provider(self, provider: str | None) -> str:
+        selected = (provider or self._default_summary_provider or "gemini").strip().lower()
+        if selected in ("local", "local_ai", "ollama"):
+            return "local"
+        return "gemini"
+
+    def _summarize_with_provider(
+        self,
+        provider: str,
+        transcript: str,
+        prompt_content: str,
+        recording_datetime: str | None = None,
+        summary_model: str | None = None,
+    ) -> dict:
+        if provider == "local":
+            if not self._ollama_summarization_service:
+                raise RuntimeError("Local AI summarization service is not available")
+            return self._ollama_summarization_service.summarize(
+                transcript,
+                prompt_content,
+                recording_datetime=recording_datetime,
+                model=summary_model,
+            )
+        return self._summarization_service.summarize(
+            transcript,
+            prompt_content,
+            recording_datetime=recording_datetime,
+        )
 
     @staticmethod
     def _has_saved_summary(db_rec) -> bool:
@@ -542,6 +592,8 @@ class DashboardController:
         prompt_id: str,
         rate_limit_delay_seconds: float = 0.0,
         max_retries: int = 0,
+        summary_provider: str | None = None,
+        summary_model: str | None = None,
     ) -> dict:
         unique_names = []
         seen = set()
@@ -562,6 +614,7 @@ class DashboardController:
         counts = {"summarized": 0, "skipped_existing": 0, "skipped_no_transcript": 0, "failed": 0}
         delay_seconds = max(float(rate_limit_delay_seconds or 0), 0.0)
         retries = max(int(max_retries or 0), 0)
+        provider = self._normalize_summary_provider(summary_provider)
 
         for index, bare_name in enumerate(unique_names):
             db_rec = self._sqlite_db_repository.get_recording_by_name(bare_name)
@@ -582,11 +635,18 @@ class DashboardController:
 
             result = None
             for attempt in range(retries + 1):
-                result = self.summarize_recording(bare_name, prompt_id)
+                result = self.summarize_recording(
+                    bare_name,
+                    prompt_id,
+                    summary_provider=provider,
+                    summary_model=summary_model,
+                )
                 if result.get("ok"):
                     break
                 error = result.get("error", "")
-                if attempt >= retries or not self._is_transient_gemini_error(error):
+                if attempt >= retries:
+                    break
+                if provider == "gemini" and not self._is_transient_gemini_error(error):
                     break
                 if delay_seconds > 0:
                     time.sleep(delay_seconds)
@@ -600,6 +660,8 @@ class DashboardController:
                         "summary_id": result.get("summary_id"),
                         "version": result.get("version"),
                         "title": result.get("title"),
+                        "summary_provider": result.get("summary_provider"),
+                        "summary_model": result.get("summary_model"),
                     }
                 )
             else:
@@ -622,6 +684,8 @@ class DashboardController:
         prompt_id: str,
         rate_limit_delay_seconds: float = 0.0,
         max_retries: int = 0,
+        summary_provider: str | None = None,
+        summary_model: str | None = None,
     ) -> dict:
         missing = self.list_missing_summaries()
         names = [rec["name"] for rec in missing["recordings"]]
@@ -637,6 +701,8 @@ class DashboardController:
             prompt_id,
             rate_limit_delay_seconds=rate_limit_delay_seconds,
             max_retries=max_retries,
+            summary_provider=summary_provider,
+            summary_model=summary_model,
         )
 
     def get_summaries(self, name: str) -> dict:

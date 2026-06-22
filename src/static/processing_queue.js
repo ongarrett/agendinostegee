@@ -53,7 +53,7 @@ function renderJobs(jobs) {
     body.innerHTML = jobs.map(job => {
         const provider = job.job_type === "transcribe"
             ? (job.engine || "whisper")
-            : (job.prompt_id || "");
+            : `${job.summary_provider || "gemini"}${job.summary_model ? ` / ${job.summary_model}` : ""}`;
         const error = job.error ? `<span class="text-danger queue-error">${queueEscapeHtml(job.error)}</span>` : "";
         return `
             <tr>

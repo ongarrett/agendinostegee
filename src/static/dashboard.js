@@ -1174,18 +1174,29 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    function selectedSummaryProviderConfig() {
+        const provider = $("#summary-provider-select")?.value || "gemini";
+        const model = $("#summary-local-model-select")?.value || "llama3.1";
+        return {
+            summary_provider: provider,
+            summary_model: provider === "local" ? model : null,
+        };
+    }
+
     async function runBulkSummarization({ promptId, names = null, missing = false } = {}) {
         if (!missing && (!names || names.length === 0)) {
             showDashboardAlert("alert-warning", '<i class="bi bi-info-circle me-1"></i>Select at least one recording first.');
             return;
         }
+        const providerConfig = selectedSummaryProviderConfig();
 
         const endpoint = missing ? BULK_SUMMARIZE_MISSING_URL : BULK_SUMMARIZE_SELECTED_URL;
         const payload = missing
-            ? { prompt_id: promptId, rate_limit_delay_seconds: 1, max_retries: 1 }
-            : { names, prompt_id: promptId, rate_limit_delay_seconds: 1, max_retries: 1 };
+            ? { prompt_id: promptId, rate_limit_delay_seconds: 1, max_retries: 1, ...providerConfig }
+            : { names, prompt_id: promptId, rate_limit_delay_seconds: 1, max_retries: 1, ...providerConfig };
 
-        showDashboardAlert("alert-info", '<span class="spinner-border spinner-border-sm me-1"></span>Generating summaries…');
+        const providerLabel = providerConfig.summary_provider === "local" ? "Local AI" : "Gemini";
+        showDashboardAlert("alert-info", `<span class="spinner-border spinner-border-sm me-1"></span>Generating summaries with ${providerLabel}…`);
         try {
             const res = await fetch(endpoint, {
                 method: "POST",
@@ -3463,6 +3474,21 @@ document.addEventListener("DOMContentLoaded", () => {
             
             let html = `
                 <div class="mb-3">
+                    <label class="form-label text-muted small fw-bold">Summary Provider</label>
+                    <select class="form-select" id="summary-provider-select">
+                        <option value="gemini">Gemini</option>
+                        <option value="local">Local AI (Ollama)</option>
+                    </select>
+                </div>
+                <div class="mb-3 d-none" id="summary-local-model-container">
+                    <label class="form-label text-muted small fw-bold">Local Model</label>
+                    <select class="form-select" id="summary-local-model-select">
+                        <option value="llama3.1">llama3.1</option>
+                        <option value="qwen3">qwen3</option>
+                        <option value="mistral">mistral</option>
+                    </select>
+                </div>
+                <div class="mb-3">
                     <label class="form-label text-muted small fw-bold">Language</label>
                     <select class="form-select" id="prompt-lang-select">
                         <option value="">Select language...</option>
@@ -3489,6 +3515,16 @@ document.addEventListener("DOMContentLoaded", () => {
             const typeSelect = promptList.querySelector('#prompt-type-select');
             const fileContainer = promptList.querySelector('#prompt-file-container');
             const btnContainer = promptList.querySelector('#prompt-buttons-container');
+            const providerSelect = promptList.querySelector('#summary-provider-select');
+            const localModelContainer = promptList.querySelector('#summary-local-model-container');
+
+            providerSelect.addEventListener('change', () => {
+                if (providerSelect.value === "local") {
+                    show(localModelContainer);
+                } else {
+                    hide(localModelContainer);
+                }
+            });
 
             langSelect.addEventListener('change', () => {
                 const lang = langSelect.value;
@@ -3536,6 +3572,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         e.preventDefault();
         const promptId = selectBtn.dataset.promptId;
+        const providerConfig = selectedSummaryProviderConfig();
 
         // Disable all prompt buttons while working
         promptList.querySelectorAll(".btn-select-prompt").forEach(b => b.disabled = true);
@@ -3553,7 +3590,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (currentSummarizeMode === "queue" && currentSummarizeQueue) {
             await enqueueProcessingJob({
                 url: currentSummarizeQueue.url,
-                payload: { ...currentSummarizeQueue.payload, prompt_id: promptId },
+                payload: { ...currentSummarizeQueue.payload, prompt_id: promptId, ...providerConfig },
                 triggerBtn: currentSummarizeQueue.triggerBtn,
                 label: currentSummarizeQueue.label,
             });
@@ -3567,7 +3604,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch(`${SUMMARIZE_URL}/${encodeURIComponent(currentSummarizeName)}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt_id: promptId }),
+                body: JSON.stringify({ prompt_id: promptId, ...providerConfig }),
             });
             const data = await res.json();
 

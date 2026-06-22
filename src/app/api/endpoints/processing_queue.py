@@ -50,6 +50,8 @@ async def enqueue_summarize_newest(
         limit=body.limit or 25,
         collection_id=body.collection_id,
         prompt_id=body.prompt_id,
+        summary_provider=body.summary_provider,
+        summary_model=body.summary_model,
     )
 
 
@@ -60,7 +62,12 @@ async def enqueue_summarize_collection(
 ):
     if body.collection_id is None:
         return {"ok": False, "error": "collection_id is required"}
-    return processing_queue_service.enqueue_summarize_collection(body.collection_id, prompt_id=body.prompt_id)
+    return processing_queue_service.enqueue_summarize_collection(
+        body.collection_id,
+        prompt_id=body.prompt_id,
+        summary_provider=body.summary_provider,
+        summary_model=body.summary_model,
+    )
 
 
 @router.post("/enqueue/summarize-missing")
@@ -68,7 +75,11 @@ async def enqueue_summarize_missing(
     body: QueueSummarizationRequestDTO,
     processing_queue_service: ProcessingQueueService = Depends(depends.get_processing_queue_service),
 ):
-    return processing_queue_service.enqueue_summarize_missing(prompt_id=body.prompt_id)
+    return processing_queue_service.enqueue_summarize_missing(
+        prompt_id=body.prompt_id,
+        summary_provider=body.summary_provider,
+        summary_model=body.summary_model,
+    )
 
 
 @router.post("/process-next")

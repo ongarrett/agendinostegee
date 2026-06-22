@@ -131,6 +131,8 @@ CREATE TABLE IF NOT EXISTS processing_queue
     recording_title TEXT    DEFAULT NULL,
     status          TEXT    NOT NULL DEFAULT 'pending',
     engine          TEXT    DEFAULT NULL,
+    summary_provider TEXT   DEFAULT NULL,
+    summary_model   TEXT    DEFAULT NULL,
     prompt_id       TEXT    DEFAULT NULL,
     error           TEXT    DEFAULT NULL,
     attempts        INTEGER NOT NULL DEFAULT 0,
