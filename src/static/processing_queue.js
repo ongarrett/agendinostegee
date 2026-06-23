@@ -102,7 +102,7 @@ async function processQueue(url, maxJobs, button) {
         const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ max_jobs: maxJobs, reset_running: url === QUEUE_RESUME_URL }),
+            body: JSON.stringify({ max_jobs: maxJobs, max_retries: 1, reset_running: url === QUEUE_RESUME_URL }),
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
@@ -112,7 +112,9 @@ async function processQueue(url, maxJobs, button) {
         const counts = data.counts || {};
         showQueueAlert(
             counts.failed ? "alert-warning" : "alert-success",
-            `<i class="bi bi-check-circle me-1"></i>Completed ${counts.completed || 0}; failed ${counts.failed || 0}.`
+            `<i class="bi bi-check-circle me-1"></i>` +
+                `Processed ${counts.processed || 0}; completed ${counts.completed || 0}; failed ${counts.failed || 0}; ` +
+                `local ${counts.local || 0}; Gemini ${counts.gemini || 0}; retries ${counts.retries || 0}.`
         );
         await loadQueue();
     } catch (err) {

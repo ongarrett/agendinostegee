@@ -52,7 +52,7 @@ DEFAULT_CONFIG = {
     "WHISPER_COMPUTE_TYPE": "auto",
     "SUMMARY_PROVIDER": "gemini",
     "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
-    "OLLAMA_SUMMARY_MODEL": "llama3.1",
+    "OLLAMA_SUMMARY_MODEL": "qwen3:8b",
     "AUTH_ENABLED": "false",
     "AUTH_SECRET_KEY": "your-secret-key-here",
 }

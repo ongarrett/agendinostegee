@@ -55,17 +55,16 @@ Open **http://127.0.0.1:8000** in your browser.
 Install and start [Ollama](https://ollama.com/), then pull one or more supported models:
 
 ```bash
-ollama pull llama3.1
-ollama pull qwen3
-ollama pull mistral
+ollama pull qwen3:8b
+ollama pull llama3.1:8b
 ```
 
-In the summarization prompt picker, choose **Local AI (Ollama)** and select `llama3.1`, `qwen3`, or `mistral`. Optional `.env` settings:
+In the summarization prompt picker, choose **Local AI (Ollama)** and select `qwen3:8b` or `llama3.1:8b`. Optional `.env` settings:
 
 ```env
 SUMMARY_PROVIDER=gemini
 OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_SUMMARY_MODEL=llama3.1
+OLLAMA_SUMMARY_MODEL=qwen3:8b
 ```
 
 ## Private Remote Access With Tailscale

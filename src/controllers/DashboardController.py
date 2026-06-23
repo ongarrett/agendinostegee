@@ -45,7 +45,7 @@ class DashboardController:
         whisper_transcription_service: WhisperTranscriptionService | None = None,
         ollama_summarization_service: OllamaSummarizationService | None = None,
         default_summary_provider: str = "gemini",
-        default_ollama_summary_model: str = "llama3.1",
+        default_ollama_summary_model: str = "qwen3:8b",
         auth_enabled: bool = False,
     ):
         self._sqlite_db_repository = sqlite_db_repository

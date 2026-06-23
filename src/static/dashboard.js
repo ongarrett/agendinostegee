@@ -1176,7 +1176,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function selectedSummaryProviderConfig() {
         const provider = $("#summary-provider-select")?.value || "gemini";
-        const model = $("#summary-local-model-select")?.value || "llama3.1";
+        const model = $("#summary-local-model-select")?.value || "qwen3:8b";
         return {
             summary_provider: provider,
             summary_model: provider === "local" ? model : null,
@@ -3471,21 +3471,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const dataPrompts = data.prompts;
             const langs = [...new Set(dataPrompts.map(p => p.language))];
+            const defaultProvider = currentSummarizeMode === "single" ? "gemini" : "local";
+            const showLocalModel = defaultProvider === "local";
             
             let html = `
                 <div class="mb-3">
                     <label class="form-label text-muted small fw-bold">Summary Provider</label>
                     <select class="form-select" id="summary-provider-select">
-                        <option value="gemini">Gemini</option>
-                        <option value="local">Local AI (Ollama)</option>
+                        <option value="gemini" ${defaultProvider === "gemini" ? "selected" : ""}>Gemini</option>
+                        <option value="local" ${defaultProvider === "local" ? "selected" : ""}>Local AI (Ollama)</option>
                     </select>
                 </div>
-                <div class="mb-3 d-none" id="summary-local-model-container">
+                <div class="mb-3 ${showLocalModel ? "" : "d-none"}" id="summary-local-model-container">
                     <label class="form-label text-muted small fw-bold">Local Model</label>
                     <select class="form-select" id="summary-local-model-select">
-                        <option value="llama3.1">llama3.1</option>
-                        <option value="qwen3">qwen3</option>
-                        <option value="mistral">mistral</option>
+                        <option value="qwen3:8b">qwen3:8b</option>
+                        <option value="llama3.1:8b">llama3.1:8b</option>
                     </select>
                 </div>
                 <div class="mb-3">

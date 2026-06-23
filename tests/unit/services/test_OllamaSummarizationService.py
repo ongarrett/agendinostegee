@@ -21,10 +21,10 @@ class FakeOllamaResponse:
 
 
 def test_supported_models_allow_requested_v1_models():
-    assert OllamaSummarizationService.is_supported_model("llama3.1")
-    assert OllamaSummarizationService.is_supported_model("qwen3")
-    assert OllamaSummarizationService.is_supported_model("mistral")
+    assert OllamaSummarizationService.is_supported_model("qwen3:8b")
     assert OllamaSummarizationService.is_supported_model("llama3.1:8b")
+    assert not OllamaSummarizationService.is_supported_model("qwen3")
+    assert not OllamaSummarizationService.is_supported_model("mistral")
 
 
 def test_summarize_posts_to_ollama_and_parses_response(monkeypatch):
@@ -47,13 +47,13 @@ def test_summarize_posts_to_ollama_and_parses_response(monkeypatch):
         )
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    service = OllamaSummarizationService(base_url="http://localhost:11434", model="llama3.1", timeout_seconds=12)
+    service = OllamaSummarizationService(base_url="http://localhost:11434", model="qwen3:8b", timeout_seconds=12)
 
-    result = service.summarize("Transcript text", "Summarize clearly.", model="mistral")
+    result = service.summarize("Transcript text", "Summarize clearly.", model="llama3.1:8b")
 
     assert captured["url"] == "http://localhost:11434/api/generate"
     assert captured["timeout"] == 12
-    assert captured["payload"]["model"] == "mistral"
+    assert captured["payload"]["model"] == "llama3.1:8b"
     assert captured["payload"]["format"] == "json"
     assert result["title"] == "Local Summary"
     assert result["tags"] == ["local", "ollama"]
@@ -72,7 +72,7 @@ def test_summarize_reports_ollama_connection_failure(monkeypatch):
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    service = OllamaSummarizationService(base_url="http://localhost:11434", model="llama3.1")
+    service = OllamaSummarizationService(base_url="http://localhost:11434", model="qwen3:8b")
 
     with pytest.raises(RuntimeError, match="Is Ollama running"):
         service.summarize("Transcript", "Prompt")

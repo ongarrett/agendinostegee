@@ -87,7 +87,11 @@ async def process_next_job(
     body: ProcessQueueRequestDTO = ProcessQueueRequestDTO(),
     processing_queue_service: ProcessingQueueService = Depends(depends.get_processing_queue_service),
 ):
-    return processing_queue_service.process_next(max_jobs=body.max_jobs, reset_running=body.reset_running)
+    return processing_queue_service.process_next(
+        max_jobs=body.max_jobs,
+        reset_running=body.reset_running,
+        max_retries=body.max_retries,
+    )
 
 
 @router.post("/resume")
@@ -95,4 +99,6 @@ async def resume_processing_queue(
     body: ProcessQueueRequestDTO = ProcessQueueRequestDTO(max_jobs=5, reset_running=True),
     processing_queue_service: ProcessingQueueService = Depends(depends.get_processing_queue_service),
 ):
-    return processing_queue_service.process_next(max_jobs=body.max_jobs, reset_running=True)
+    return processing_queue_service.process_next(
+        max_jobs=body.max_jobs, reset_running=True, max_retries=body.max_retries
+    )

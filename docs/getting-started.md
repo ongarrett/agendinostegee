@@ -66,7 +66,7 @@ GEMINI_EMBEDDING_MODEL=text-embedding-001
 # Optional - Summary provider settings
 SUMMARY_PROVIDER=gemini              # gemini | local
 OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_SUMMARY_MODEL=llama3.1        # llama3.1 | qwen3 | mistral
+OLLAMA_SUMMARY_MODEL=qwen3:8b        # qwen3:8b | llama3.1:8b
 
 # Optional - Notion integration
 NOTION_API_KEY=your-notion-integration-token
@@ -89,9 +89,8 @@ See [Authentication](authentication.md) for details on `AUTH_ENABLED` and [Trans
 For local summary generation, install Ollama, keep it running, and pull at least one supported model:
 
 ```bash
-ollama pull llama3.1
-ollama pull qwen3
-ollama pull mistral
+ollama pull qwen3:8b
+ollama pull llama3.1:8b
 ```
 
 Then choose **Local AI (Ollama)** in the summary prompt picker.

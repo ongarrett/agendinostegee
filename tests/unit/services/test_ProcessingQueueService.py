@@ -94,13 +94,13 @@ def test_enqueue_summarize_newest_persists_local_provider_and_model(queue_db):
         limit=25,
         prompt_id="en/general/Brief",
         summary_provider="local",
-        summary_model="qwen3",
+        summary_model="qwen3:8b",
     )
     jobs = service.list_jobs()["jobs"]
 
     assert result["counts"]["enqueued"] == 1
     assert jobs[0]["summary_provider"] == "local"
-    assert jobs[0]["summary_model"] == "qwen3"
+    assert jobs[0]["summary_model"] == "qwen3:8b"
 
 
 def test_collection_transcription_is_scoped_to_collection(queue_db):
@@ -140,7 +140,10 @@ def test_process_next_updates_completed_and_failed_statuses(queue_db):
     result = service.process_next(max_jobs=2)
     jobs = service.list_jobs()["jobs"]
 
-    assert result["counts"] == {"completed": 1, "failed": 1}
+    assert result["counts"]["processed"] == 2
+    assert result["counts"]["completed"] == 1
+    assert result["counts"]["failed"] == 1
+    assert result["counts"]["transcribe"] == 2
     assert {job["recording_name"]: job["status"] for job in jobs} == {
         "ok": "completed",
         "bad": "failed",
@@ -160,7 +163,7 @@ def test_process_next_passes_summary_provider_and_model(queue_db):
         ["alpha"],
         prompt_id="prompt",
         summary_provider="local",
-        summary_model="llama3.1",
+        summary_model="qwen3:8b",
     )
 
     result = service.process_next(max_jobs=1)
@@ -171,9 +174,42 @@ def test_process_next_passes_summary_provider_and_model(queue_db):
             "name": "alpha",
             "prompt_id": "prompt",
             "summary_provider": "local",
-            "summary_model": "llama3.1",
+            "summary_model": "qwen3:8b",
         }
     ]
+
+
+def test_process_next_retries_failed_job_before_success(queue_db):
+    insert_recording(queue_db, "alpha", transcript="Transcript")
+    dashboard = FakeDashboardController()
+    dashboard.fail_summarize.add("alpha")
+    service = ProcessingQueueService(queue_db, dashboard)
+    queue_db.enqueue_processing_jobs(
+        "summarize",
+        ["alpha"],
+        prompt_id="prompt",
+        summary_provider="local",
+        summary_model="qwen3:8b",
+    )
+
+    original_summarize = dashboard.summarize_recording
+    attempts = {"count": 0}
+
+    def fail_once_then_succeed(*args, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return {"ok": False, "error": "Temporary local model error"}
+        dashboard.fail_summarize.clear()
+        return original_summarize(*args, **kwargs)
+
+    dashboard.summarize_recording = fail_once_then_succeed
+
+    result = service.process_next(max_jobs=1, max_retries=1)
+
+    assert result["counts"]["completed"] == 1
+    assert result["counts"]["failed"] == 0
+    assert result["counts"]["local"] == 1
+    assert result["counts"]["retries"] == 1
 
 
 def test_resume_resets_running_jobs_before_processing(queue_db):

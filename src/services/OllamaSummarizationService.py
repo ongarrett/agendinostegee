@@ -7,19 +7,18 @@ from services.SummarizationService import STRUCTURED_INSTRUCTIONS, Summarization
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_OLLAMA_SUMMARY_MODELS = {"llama3.1", "qwen3", "mistral"}
+SUPPORTED_OLLAMA_SUMMARY_MODELS = {"llama3.1:8b", "qwen3:8b"}
 
 
 class OllamaSummarizationService:
-    def __init__(self, base_url: str = "http://127.0.0.1:11434", model: str = "llama3.1", timeout_seconds: int = 180):
+    def __init__(self, base_url: str = "http://127.0.0.1:11434", model: str = "qwen3:8b", timeout_seconds: int = 180):
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout_seconds = timeout_seconds
 
     @staticmethod
     def is_supported_model(model: str) -> bool:
-        base = (model or "").split(":", 1)[0].strip()
-        return base in SUPPORTED_OLLAMA_SUMMARY_MODELS
+        return (model or "").strip() in SUPPORTED_OLLAMA_SUMMARY_MODELS
 
     def summarize(
         self,

@@ -373,12 +373,12 @@ class TestDashboardControllerSummarizeRecording:
             "test",
             "prompt_id",
             summary_provider="local",
-            summary_model="mistral",
+            summary_model="llama3.1:8b",
         )
 
         assert result["ok"] is True
         assert result["summary_provider"] == "local"
-        assert result["summary_model"] == "mistral"
+        assert result["summary_model"] == "llama3.1:8b"
         mock_services["ollama_summarization_service"].summarize.assert_called_once()
         mock_services["summarization_service"].summarize.assert_not_called()
 

@@ -15,7 +15,7 @@ Once a recording has been transcribed, you can generate a structured summary usi
 1. Make sure the recording has been transcribed first.
 2. Click **Summarize** and choose a summary provider:
    - **Gemini** for cloud generation.
-   - **Local AI (Ollama)** for local generation with `llama3.1`, `qwen3`, or `mistral`.
+   - **Local AI (Ollama)** for local generation with `qwen3:8b` or `llama3.1:8b`.
 3. Choose a **system prompt** from the available categories (e.g. `Generale / SintesiAdattiva`, `IT&Engineering / VerbaleIT`).
 4. The selected provider generates a structured JSON response containing:
    - **Title** - a concise summary title.
@@ -28,9 +28,8 @@ Once a recording has been transcribed, you can generate a structured summary usi
 Install and start Ollama, then pull at least one supported model:
 
 ```bash
-ollama pull llama3.1
-ollama pull qwen3
-ollama pull mistral
+ollama pull qwen3:8b
+ollama pull llama3.1:8b
 ```
 
 Optional `.env` settings:
@@ -38,10 +37,10 @@ Optional `.env` settings:
 ```env
 SUMMARY_PROVIDER=gemini
 OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_SUMMARY_MODEL=llama3.1
+OLLAMA_SUMMARY_MODEL=qwen3:8b
 ```
 
-Local summary generation requires Ollama to be running at `OLLAMA_BASE_URL`. Batch summarization and queued summary jobs preserve the selected provider and model.
+Local summary generation requires Ollama to be running at `OLLAMA_BASE_URL`. Batch summarization and queued summary jobs default to **Local AI** and preserve the selected provider and model. Single-recording summaries still allow Gemini or Local AI from the same prompt picker.
 
 ## Multiple Summary Versions
 
