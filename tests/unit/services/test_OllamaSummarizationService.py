@@ -23,8 +23,14 @@ class FakeOllamaResponse:
 def test_supported_models_allow_requested_v1_models():
     assert OllamaSummarizationService.is_supported_model("qwen3:8b")
     assert OllamaSummarizationService.is_supported_model("llama3.1:8b")
-    assert not OllamaSummarizationService.is_supported_model("qwen3")
+    assert OllamaSummarizationService.is_supported_model("qwen3")
+    assert OllamaSummarizationService.is_supported_model("llama3.1")
     assert not OllamaSummarizationService.is_supported_model("mistral")
+
+
+def test_normalize_model_maps_legacy_aliases():
+    assert OllamaSummarizationService.normalize_model("qwen3") == "qwen3:8b"
+    assert OllamaSummarizationService.normalize_model("llama3.1") == "llama3.1:8b"
 
 
 def test_summarize_posts_to_ollama_and_parses_response(monkeypatch):
@@ -49,7 +55,7 @@ def test_summarize_posts_to_ollama_and_parses_response(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     service = OllamaSummarizationService(base_url="http://localhost:11434", model="qwen3:8b", timeout_seconds=12)
 
-    result = service.summarize("Transcript text", "Summarize clearly.", model="llama3.1:8b")
+    result = service.summarize("Transcript text", "Summarize clearly.", model="llama3.1")
 
     assert captured["url"] == "http://localhost:11434/api/generate"
     assert captured["timeout"] == 12

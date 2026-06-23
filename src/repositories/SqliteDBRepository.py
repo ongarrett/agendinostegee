@@ -216,6 +216,7 @@ class SqliteDBRepository:
             """)
             self._ensure_column(conn, "processing_queue", "summary_provider", "TEXT DEFAULT NULL")
             self._ensure_column(conn, "processing_queue", "summary_model", "TEXT DEFAULT NULL")
+            self._migrate_processing_queue_summary_models(conn)
             conn.commit()
         finally:
             conn.close()
@@ -225,6 +226,27 @@ class SqliteDBRepository:
         columns = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    @staticmethod
+    def _migrate_processing_queue_summary_models(conn: sqlite3.Connection) -> None:
+        """Normalize old local summary jobs that used short Ollama model names."""
+        migrations = {
+            "qwen3": "qwen3:8b",
+            "llama3.1": "llama3.1:8b",
+        }
+        for old_model, new_model in migrations.items():
+            conn.execute(
+                """
+                UPDATE processing_queue
+                SET summary_model = ?,
+                    updated_at = datetime('now')
+                WHERE job_type = 'summarize'
+                  AND status IN ('pending', 'running', 'failed')
+                  AND COALESCE(summary_provider, '') IN ('local', 'local_ai', 'ollama')
+                  AND summary_model = ?
+                """,
+                (new_model, old_model),
+            )
 
     def get_recordings(self) -> list[DBRecording]:
         conn = self._connect()
@@ -2481,6 +2503,24 @@ class SqliteDBRepository:
                 WHERE id = ?
                 """,
                 (status, error, job_id),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM processing_queue WHERE id = ?", (job_id,)).fetchone()
+            return self._processing_job_from_row(row) if row else None
+        finally:
+            conn.close()
+
+    def update_processing_queue_job_summary_model(self, job_id: int, summary_model: str) -> dict | None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE processing_queue
+                SET summary_model = ?,
+                    updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (summary_model, job_id),
             )
             conn.commit()
             row = conn.execute("SELECT * FROM processing_queue WHERE id = ?", (job_id,)).fetchone()

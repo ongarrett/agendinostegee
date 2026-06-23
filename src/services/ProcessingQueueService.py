@@ -1,5 +1,6 @@
 from controllers.DashboardController import DashboardController
 from repositories.SqliteDBRepository import SqliteDBRepository
+from services.OllamaSummarizationService import OllamaSummarizationService
 
 
 class ProcessingQueueService:
@@ -44,6 +45,7 @@ class ProcessingQueueService:
         summary_provider: str = "local",
         summary_model: str | None = "qwen3:8b",
     ) -> dict:
+        summary_model = self._normalize_summary_model(summary_provider, summary_model)
         names = self._sqlite_db_repository.get_missing_summary_recording_names(
             limit=limit,
             collection_id=collection_id,
@@ -64,6 +66,7 @@ class ProcessingQueueService:
         summary_provider: str = "local",
         summary_model: str | None = "qwen3:8b",
     ) -> dict:
+        summary_model = self._normalize_summary_model(summary_provider, summary_model)
         names = self._sqlite_db_repository.get_missing_summary_recording_names(collection_id=collection_id)
         result = self._sqlite_db_repository.enqueue_processing_jobs(
             "summarize",
@@ -80,6 +83,7 @@ class ProcessingQueueService:
         summary_provider: str = "local",
         summary_model: str | None = "qwen3:8b",
     ) -> dict:
+        summary_model = self._normalize_summary_model(summary_provider, summary_model)
         names = self._sqlite_db_repository.get_missing_summary_recording_names()
         result = self._sqlite_db_repository.enqueue_processing_jobs(
             "summarize",
@@ -98,6 +102,19 @@ class ProcessingQueueService:
             f"Skipped {result['counts']['skipped_active']} already pending/running job(s)."
         )
         return result
+
+    @staticmethod
+    def _normalize_summary_provider(summary_provider: str | None) -> str:
+        selected = (summary_provider or "gemini").strip().lower()
+        if selected in ("local", "local_ai", "ollama"):
+            return "local"
+        return "gemini"
+
+    @classmethod
+    def _normalize_summary_model(cls, summary_provider: str | None, summary_model: str | None) -> str | None:
+        if cls._normalize_summary_provider(summary_provider) != "local":
+            return None
+        return OllamaSummarizationService.normalize_model(summary_model)
 
     def process_next(self, max_jobs: int = 1, reset_running: bool = False, max_retries: int = 0) -> dict:
         if reset_running:
@@ -123,7 +140,7 @@ class ProcessingQueueService:
             counts["processed"] += 1
             counts[job["job_type"]] = counts.get(job["job_type"], 0) + 1
             if job["job_type"] == "summarize":
-                provider = job.get("summary_provider") or "gemini"
+                provider = self._normalize_summary_provider(job.get("summary_provider"))
                 counts[provider] = counts.get(provider, 0) + 1
             counts["retries"] += result.get("retries", 0)
             if result["status"] == "completed":
@@ -155,12 +172,16 @@ class ProcessingQueueService:
                 engine=job["engine"] or "whisper",
             )
         elif job["job_type"] == "summarize":
-            result = self._dashboard_controller.summarize_recording(
-                job["recording_name"],
-                job["prompt_id"],
-                summary_provider=job.get("summary_provider"),
-                summary_model=job.get("summary_model"),
-            )
+            job = self._validate_summary_job(job)
+            if job.get("validation_error"):
+                result = {"ok": False, "error": job["validation_error"]}
+            else:
+                result = self._dashboard_controller.summarize_recording(
+                    job["recording_name"],
+                    job["prompt_id"],
+                    summary_provider=job.get("summary_provider"),
+                    summary_model=job.get("summary_model"),
+                )
         else:
             result = {"ok": False, "error": f"Unsupported job type '{job['job_type']}'"}
 
@@ -184,3 +205,24 @@ class ProcessingQueueService:
             "error": error,
             "job": updated,
         }
+
+    def _validate_summary_job(self, job: dict) -> dict:
+        provider = self._normalize_summary_provider(job.get("summary_provider"))
+        if provider != "local":
+            return {**job, "summary_provider": provider}
+
+        model = OllamaSummarizationService.normalize_model(job.get("summary_model"))
+        if not OllamaSummarizationService.is_supported_model(model):
+            supported = ", ".join(sorted(OllamaSummarizationService.supported_models()))
+            return {
+                **job,
+                "summary_provider": provider,
+                "summary_model": model,
+                "validation_error": f"Unsupported local summary model '{model}'. Supported models: {supported}",
+            }
+
+        if model != job.get("summary_model"):
+            updated = self._sqlite_db_repository.update_processing_queue_job_summary_model(job["id"], model)
+            if updated:
+                job = updated
+        return {**job, "summary_provider": provider, "summary_model": model}

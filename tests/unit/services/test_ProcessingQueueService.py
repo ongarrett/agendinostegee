@@ -103,6 +103,46 @@ def test_enqueue_summarize_newest_persists_local_provider_and_model(queue_db):
     assert jobs[0]["summary_model"] == "qwen3:8b"
 
 
+def test_enqueue_summarize_newest_normalizes_legacy_local_model_alias(queue_db):
+    insert_recording(queue_db, "missing-summary", transcript="Transcript")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    result = service.enqueue_summarize_newest(
+        limit=25,
+        prompt_id="en/general/Brief",
+        summary_provider="local",
+        summary_model="qwen3",
+    )
+    jobs = service.list_jobs()["jobs"]
+
+    assert result["counts"]["enqueued"] == 1
+    assert jobs[0]["summary_model"] == "qwen3:8b"
+
+
+def test_pending_local_summary_jobs_are_migrated_to_exact_model_ids(tmp_path):
+    db_name = "processing_queue_migration_test.db"
+    db = SqliteDBRepository(db_name, str(tmp_path), "settings/db_init.sql")
+    insert_recording(db, "alpha", transcript="Transcript")
+    insert_recording(db, "beta", transcript="Transcript")
+    db.enqueue_processing_jobs(
+        "summarize",
+        ["alpha", "beta"],
+        prompt_id="prompt",
+        summary_provider="local",
+        summary_model="qwen3",
+    )
+    beta_job = [job for job in db.list_processing_queue_jobs() if job["recording_name"] == "beta"][0]
+    db.update_processing_queue_job_status(beta_job["id"], "failed", error="old failure")
+
+    migrated_db = SqliteDBRepository(db_name, str(tmp_path), "settings/db_init.sql")
+    jobs = migrated_db.list_processing_queue_jobs()
+
+    assert {job["recording_name"]: job["summary_model"] for job in jobs} == {
+        "alpha": "qwen3:8b",
+        "beta": "qwen3:8b",
+    }
+
+
 def test_collection_transcription_is_scoped_to_collection(queue_db):
     insert_recording(queue_db, "in-collection")
     insert_recording(queue_db, "outside")
@@ -177,6 +217,45 @@ def test_process_next_passes_summary_provider_and_model(queue_db):
             "summary_model": "qwen3:8b",
         }
     ]
+
+
+def test_process_next_normalizes_legacy_local_model_before_execution(queue_db):
+    insert_recording(queue_db, "alpha", transcript="Transcript")
+    dashboard = FakeDashboardController()
+    service = ProcessingQueueService(queue_db, dashboard)
+    queue_db.enqueue_processing_jobs(
+        "summarize",
+        ["alpha"],
+        prompt_id="prompt",
+        summary_provider="local",
+        summary_model="llama3.1",
+    )
+
+    result = service.process_next(max_jobs=1)
+    jobs = service.list_jobs()["jobs"]
+
+    assert result["counts"]["completed"] == 1
+    assert dashboard.summarized[0]["summary_model"] == "llama3.1:8b"
+    assert jobs[0]["summary_model"] == "llama3.1:8b"
+
+
+def test_process_next_rejects_unsupported_local_model_before_execution(queue_db):
+    insert_recording(queue_db, "alpha", transcript="Transcript")
+    dashboard = FakeDashboardController()
+    service = ProcessingQueueService(queue_db, dashboard)
+    queue_db.enqueue_processing_jobs(
+        "summarize",
+        ["alpha"],
+        prompt_id="prompt",
+        summary_provider="local",
+        summary_model="unsupported",
+    )
+
+    result = service.process_next(max_jobs=1)
+
+    assert result["counts"]["failed"] == 1
+    assert "Unsupported local summary model" in result["results"][0]["error"]
+    assert dashboard.summarized == []
 
 
 def test_process_next_retries_failed_job_before_success(queue_db):

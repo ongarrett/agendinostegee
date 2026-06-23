@@ -496,7 +496,9 @@ class DashboardController:
 
         recording_datetime = self._parse_recording_datetime(bare_name)
         provider = self._normalize_summary_provider(summary_provider)
-        model = summary_model or (self._default_ollama_summary_model if provider == "local" else None)
+        model = None
+        if provider == "local":
+            model = OllamaSummarizationService.normalize_model(summary_model or self._default_ollama_summary_model)
 
         try:
             result = self._summarize_with_provider(
