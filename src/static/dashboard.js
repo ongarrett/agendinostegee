@@ -1175,7 +1175,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function selectedSummaryProviderConfig() {
-        const provider = $("#summary-provider-select")?.value || "gemini";
+        const provider = $("#summary-provider-select")?.value || "local";
         const model = $("#summary-local-model-select")?.value || "qwen3:8b";
         return {
             summary_provider: provider,
@@ -1183,19 +1183,31 @@ document.addEventListener("DOMContentLoaded", () => {
         };
     }
 
-    async function runBulkSummarization({ promptId, names = null, missing = false } = {}) {
+    function summaryProviderLabel(providerConfig) {
+        if (providerConfig.summary_provider === "local") {
+            return `Local AI / Ollama (${providerConfig.summary_model || "qwen3:8b"})`;
+        }
+        return "Gemini";
+    }
+
+    function localSummarySetupHint(providerConfig) {
+        if (providerConfig.summary_provider !== "local") return "";
+        return " Make sure Ollama is running: ollama serve; install the model: ollama pull qwen3:8b.";
+    }
+
+    async function runBulkSummarization({ promptId, names = null, missing = false, providerConfig = null } = {}) {
         if (!missing && (!names || names.length === 0)) {
             showDashboardAlert("alert-warning", '<i class="bi bi-info-circle me-1"></i>Select at least one recording first.');
             return;
         }
-        const providerConfig = selectedSummaryProviderConfig();
+        providerConfig = providerConfig || selectedSummaryProviderConfig();
 
         const endpoint = missing ? BULK_SUMMARIZE_MISSING_URL : BULK_SUMMARIZE_SELECTED_URL;
         const payload = missing
             ? { prompt_id: promptId, rate_limit_delay_seconds: 1, max_retries: 1, ...providerConfig }
             : { names, prompt_id: promptId, rate_limit_delay_seconds: 1, max_retries: 1, ...providerConfig };
 
-        const providerLabel = providerConfig.summary_provider === "local" ? "Local AI" : "Gemini";
+        const providerLabel = summaryProviderLabel(providerConfig);
         showDashboardAlert("alert-info", `<span class="spinner-border spinner-border-sm me-1"></span>Generating summaries with ${providerLabel}…`);
         try {
             const res = await fetch(endpoint, {
@@ -1206,20 +1218,23 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await res.json();
             const counts = data.counts || {};
             const failed = counts.failed || 0;
-            const message = `Summarized ${counts.summarized || 0}; skipped existing ${counts.skipped_existing || 0}; skipped without transcript ${counts.skipped_no_transcript || 0}; failed ${failed}.`;
+            const message = `Summarized ${counts.summarized || 0}; skipped existing ${counts.skipped_existing || 0}; skipped without transcript ${counts.skipped_no_transcript || 0}; failed ${failed} using ${providerLabel}.`;
 
             if (!res.ok || !data.ok) {
                 const detail = data.error || message || "Bulk summarization failed.";
                 showDashboardAlert(
                     failed > 0 ? "alert-warning" : "alert-danger",
-                    `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(detail)} ${escapeHtml(message)}`
+                    `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(detail)} ${escapeHtml(message)}${escapeHtml(localSummarySetupHint(providerConfig))}`
                 );
             } else {
                 showDashboardAlert("alert-success", `<i class="bi bi-check-circle me-1"></i>${escapeHtml(message)}`);
             }
             await loadDashboard();
         } catch (err) {
-            showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Bulk summarization failed: ${escapeHtml(err.message)}`);
+            showDashboardAlert(
+                "alert-danger",
+                `<i class="bi bi-exclamation-triangle me-1"></i>Bulk summarization with ${escapeHtml(providerLabel)} failed: ${escapeHtml(err.message)}${escapeHtml(localSummarySetupHint(providerConfig))}`
+            );
         }
     }
 
@@ -1229,7 +1244,9 @@ document.addEventListener("DOMContentLoaded", () => {
             triggerBtn.disabled = true;
             triggerBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queueing…';
         }
-        showDashboardAlert("alert-info", `<span class="spinner-border spinner-border-sm me-1"></span>Queueing ${escapeHtml(label)}…`);
+        const providerLabel = payload?.summary_provider ? summaryProviderLabel(payload) : "";
+        const providerText = providerLabel ? ` with ${providerLabel}` : "";
+        showDashboardAlert("alert-info", `<span class="spinner-border spinner-border-sm me-1"></span>Queueing ${escapeHtml(label)}${escapeHtml(providerText)}…`);
         try {
             const res = await fetch(url, {
                 method: "POST",
@@ -1244,9 +1261,10 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             const counts = data.counts || {};
             const message = data.message || `Queued ${counts.enqueued || 0} job(s).`;
+            const providerSuffix = providerText ? `${providerText}.` : "";
             showDashboardAlert(
                 "alert-success",
-                `<i class="bi bi-check-circle me-1"></i>${escapeHtml(message)} <a href="/processing-queue" class="alert-link">Open Processing Queue</a>`
+                `<i class="bi bi-check-circle me-1"></i>${escapeHtml(message)}${escapeHtml(providerSuffix)} <a href="/processing-queue" class="alert-link">Open Processing Queue</a>`
             );
         } catch (err) {
             showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Queue request failed: ${escapeHtml(err.message)}`);
@@ -3471,15 +3489,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const dataPrompts = data.prompts;
             const langs = [...new Set(dataPrompts.map(p => p.language))];
-            const defaultProvider = currentSummarizeMode === "single" ? "gemini" : "local";
+            const defaultProvider = "local";
             const showLocalModel = defaultProvider === "local";
             
             let html = `
                 <div class="mb-3">
                     <label class="form-label text-muted small fw-bold">Summary Provider</label>
                     <select class="form-select" id="summary-provider-select">
-                        <option value="gemini" ${defaultProvider === "gemini" ? "selected" : ""}>Gemini</option>
                         <option value="local" ${defaultProvider === "local" ? "selected" : ""}>Local AI (Ollama)</option>
+                        <option value="gemini" ${defaultProvider === "gemini" ? "selected" : ""}>Gemini</option>
                     </select>
                 </div>
                 <div class="mb-3 ${showLocalModel ? "" : "d-none"}" id="summary-local-model-container">
@@ -3581,11 +3599,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
         closePromptPicker();
         if (currentSummarizeMode === "missing") {
-            await runBulkSummarization({ promptId, missing: true });
+            await runBulkSummarization({ promptId, missing: true, providerConfig });
             return;
         }
         if (currentSummarizeMode === "selected") {
-            await runBulkSummarization({ promptId, names: currentSummarizeNames });
+            await runBulkSummarization({ promptId, names: currentSummarizeNames, providerConfig });
             return;
         }
         if (currentSummarizeMode === "queue" && currentSummarizeQueue) {
@@ -3599,7 +3617,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         openSummaryModal(currentSummarizeName);
-        summaryLoading.querySelector("p").textContent = "Generating summary with Gemini AI… this may take a moment.";
+        const providerLabel = summaryProviderLabel(providerConfig);
+        summaryLoading.querySelector("p").textContent = `Generating summary with ${providerLabel}… this may take a moment.`;
 
         try {
             const res = await fetch(`${SUMMARIZE_URL}/${encodeURIComponent(currentSummarizeName)}`, {
@@ -3614,12 +3633,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 await loadDashboard();
                 await renderAndShowRecordingDetail(currentSummarizeName);
             } else {
-                summaryError.textContent = data.error;
+                summaryError.textContent = `${data.error}${localSummarySetupHint(providerConfig)}`;
                 show(summaryError);
             }
         } catch (err) {
             hide(summaryLoading);
-            summaryError.textContent = `Summarization failed: ${err.message}`;
+            summaryError.textContent = `Summarization with ${providerLabel} failed: ${err.message}${localSummarySetupHint(providerConfig)}`;
             show(summaryError);
         }
     });

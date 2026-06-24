@@ -12,6 +12,7 @@ OLLAMA_SUMMARY_MODEL_ALIASES = {
     "llama3.1": "llama3.1:8b",
     "qwen3": "qwen3:8b",
 }
+OLLAMA_SETUP_HINT = "Run: ollama serve; ollama pull qwen3:8b"
 
 
 class OllamaSummarizationService:
@@ -68,7 +69,8 @@ class OllamaSummarizationService:
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                f"Local AI summary failed. Is Ollama running at {self._base_url} with model '{selected_model}'?"
+                "Local AI / Ollama summary failed. Make sure Ollama is running and the model is installed. "
+                f"{OLLAMA_SETUP_HINT}. Endpoint: {self._base_url}. Model: {selected_model}."
             ) from exc
         except json.JSONDecodeError as exc:
             raise RuntimeError("Local AI summary failed: Ollama returned invalid JSON") from exc

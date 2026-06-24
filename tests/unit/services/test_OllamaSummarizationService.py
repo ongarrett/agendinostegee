@@ -80,5 +80,10 @@ def test_summarize_reports_ollama_connection_failure(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     service = OllamaSummarizationService(base_url="http://localhost:11434", model="qwen3:8b")
 
-    with pytest.raises(RuntimeError, match="Is Ollama running"):
+    with pytest.raises(RuntimeError) as excinfo:
         service.summarize("Transcript", "Prompt")
+
+    message = str(excinfo.value)
+    assert "Local AI / Ollama summary failed" in message
+    assert "ollama serve" in message
+    assert "ollama pull qwen3:8b" in message

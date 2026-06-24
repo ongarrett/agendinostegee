@@ -33,6 +33,16 @@ function showQueueAlert(className, message) {
     showEl(alert);
 }
 
+function jobProviderLabel(job) {
+    if (job.job_type === "transcribe") {
+        return job.engine || "whisper";
+    }
+    if (job.summary_provider === "local") {
+        return `Local AI / Ollama${job.summary_model ? ` / ${job.summary_model}` : ""}`;
+    }
+    return "Gemini";
+}
+
 function renderCounts(counts) {
     qs("#queue-count-pending").textContent = counts.pending || 0;
     qs("#queue-count-running").textContent = counts.running || 0;
@@ -51,9 +61,7 @@ function renderJobs(jobs) {
         return;
     }
     body.innerHTML = jobs.map(job => {
-        const provider = job.job_type === "transcribe"
-            ? (job.engine || "whisper")
-            : `${job.summary_provider || "gemini"}${job.summary_model ? ` / ${job.summary_model}` : ""}`;
+        const provider = jobProviderLabel(job);
         const error = job.error ? `<span class="text-danger queue-error">${queueEscapeHtml(job.error)}</span>` : "";
         return `
             <tr>

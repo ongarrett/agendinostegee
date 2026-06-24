@@ -3,8 +3,8 @@ from pydantic import BaseModel, Field
 
 class SummarizeRequestDTO(BaseModel):
     prompt_id: str
-    summary_provider: str = "gemini"
-    summary_model: str | None = None
+    summary_provider: str = "local"
+    summary_model: str | None = "qwen3:8b"
 
 
 class BulkSummarizeRequestDTO(BaseModel):
