@@ -37,12 +37,29 @@ All recordings - whether synced from a HiDock device or uploaded manually - are 
 
 ![Recording Folders](screenshots/recording-folders.png)
 
-Recordings can be organized into virtual folders for better structure:
+Recordings can be organized into virtual folders for location-style structure:
 
 - **Create** a folder from the dashboard.
 - **Rename** or **delete** folders (recordings in a deleted folder move back to root).
 - **Drag and drop** individual recordings into a folder.
 - **Bulk move** multiple selected recordings at once.
+
+Folders are separate from Collections. Moving to a folder updates the recording's folder location metadata.
+
+## Organizing with Collections
+
+Collections are thematic groupings, not filesystem folders. A recording can belong to multiple Collections while keeping the same folder, local audio file, transcript, summaries, embeddings, tags, and summary versions.
+
+From the dashboard:
+
+- Select one or more recordings.
+- Click **Add to Collection...** in the bulk actions bar.
+- Choose one Collection.
+- Confirm the action.
+
+The dashboard reports the result, for example: `23 recordings added to Archive / No Speech.`
+
+This does not move or rename underlying audio files.
 
 ## Playback
 

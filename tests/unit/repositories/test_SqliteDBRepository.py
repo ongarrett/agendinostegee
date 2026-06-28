@@ -273,6 +273,45 @@ class TestSqliteDBRepository:
         assert counts["AI Strategy"] == 2
         assert counts["Podcast Ideas"] == 1
 
+    def test_add_to_collection_preserves_recording_artifacts(self, db):
+        rec = DBRecording(
+            id=None,
+            name="archive-item",
+            label="Archive Item",
+            duration=120,
+            created_at=datetime.now(),
+            transcript="Speaker 1: keep this transcript",
+            folder="/imports/no-speech-review",
+        )
+        db.insert_recording(rec)
+        db.save_summarization_result(
+            "archive-item",
+            summary="Keep this summary",
+            title="Archive Title",
+            tags="archive,no-speech",
+            prompt_id="test",
+        )
+        db.save_recording_embedding(
+            "archive-item",
+            status="indexed",
+            model="gemini-embedding-001",
+            content_hash="abc123",
+            embedding=[0.1, 0.2],
+        )
+        collection = db.create_collection("Archive / No Speech")
+
+        added = db.add_recording_to_collection("archive-item", collection["id"])
+
+        found = db.get_recording_by_name("archive-item")
+        embeddings = db.get_recording_embedding_status_map()
+        assert added is True
+        assert found.folder == "/imports/no-speech-review"
+        assert found.transcript == "Speaker 1: keep this transcript"
+        assert found.summary == "Keep this summary"
+        assert found.tags == "archive,no-speech"
+        assert embeddings["archive-item"]["status"] == "indexed"
+        assert db.get_recording_collections("archive-item")[0]["name"] == "Archive / No Speech"
+
     def test_set_recording_collections_replaces_membership(self, db, sample_recording):
         db.insert_recording(sample_recording)
         first = db.create_collection("Leadership")

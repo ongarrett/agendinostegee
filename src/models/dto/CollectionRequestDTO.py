@@ -8,3 +8,8 @@ class CreateCollectionRequestDTO(BaseModel):
 
 class SetRecordingCollectionsRequestDTO(BaseModel):
     collection_ids: list[int]
+
+
+class BulkAddToCollectionRequestDTO(BaseModel):
+    names: list[str]
+    collection_id: int

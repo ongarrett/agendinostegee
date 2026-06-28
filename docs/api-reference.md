@@ -32,6 +32,7 @@ Full list of REST endpoints. Interactive Swagger UI is available at `http://127.
 | `DELETE` | `/api/dashboard/folders` | Delete a folder |
 | `PATCH` | `/api/dashboard/recording/{name}/move` | Move a recording to a folder |
 | `PATCH` | `/api/dashboard/recordings/move` | Bulk move recordings |
+| `POST` | `/api/dashboard/recordings/collections` | Bulk add recordings to a collection |
 
 ## Calendar - `/api/calendar`
 

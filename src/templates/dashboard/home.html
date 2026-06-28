@@ -306,6 +306,9 @@
                                                 <button class="btn btn-sm btn-outline-primary" id="btn-bulk-move" title="Move selected recordings to folder">
                                                     <i class="bi bi-folder-symlink me-1"></i>Move to…
                                                 </button>
+                                                <button class="btn btn-sm btn-outline-primary" id="btn-bulk-add-collection" title="Add selected recordings to a collection">
+                                                    <i class="bi bi-collection me-1"></i>Add to Collection…
+                                                </button>
                                                 <button class="btn btn-sm btn-outline-secondary" id="btn-bulk-index" title="Generate embeddings for selected recordings">
                                                     <i class="bi bi-diagram-3 me-1"></i>Index
                                                 </button>
@@ -715,6 +718,30 @@
                     </button>
                 </div>
                 <div id="recording-collections-feedback" class="small mt-2 d-none"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Add to Collection Modal -->
+    <div id="bulk-collection-modal-backdrop" class="transcript-modal-backdrop d-none">
+        <div class="transcript-modal" style="max-width: 480px;">
+            <div class="transcript-modal-header" style="background: var(--bs-primary);">
+                <h5 class="mb-0"><i class="bi bi-collection me-2"></i>Add to Collection</h5>
+                <button type="button" class="btn-close btn-close-white" id="bulk-collection-modal-close"></button>
+            </div>
+            <div class="transcript-modal-body">
+                <p class="text-muted small mb-2" id="bulk-collection-recording-count"></p>
+                <div id="bulk-collection-list" class="collection-checkbox-list"></div>
+                <div id="bulk-collection-empty" class="text-muted small d-none">
+                    Create a collection first, then add selected recordings.
+                </div>
+                <div class="text-end mt-3">
+                    <button class="btn btn-outline-secondary btn-sm me-2" id="bulk-collection-cancel">Cancel</button>
+                    <button class="btn btn-primary btn-sm" id="bulk-collection-save">
+                        <i class="bi bi-plus-lg me-1"></i>Add
+                    </button>
+                </div>
+                <div id="bulk-collection-feedback" class="small mt-2 d-none"></div>
             </div>
         </div>
     </div>

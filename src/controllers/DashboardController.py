@@ -1037,6 +1037,49 @@ class DashboardController:
             return {"ok": False, "error": "Recording or collection not found"}
         return {"ok": True, "name": bare_name, "collection_id": collection_id}
 
+    def bulk_add_recordings_to_collection(self, names: list[str], collection_id: int) -> dict:
+        unique_names = []
+        seen = set()
+        for name in names:
+            bare_name = self._bare_name(name)
+            if bare_name and bare_name not in seen:
+                unique_names.append(bare_name)
+                seen.add(bare_name)
+
+        if not unique_names:
+            return {"ok": False, "error": "No recordings selected"}
+
+        collections = self._sqlite_db_repository.get_collections_with_counts()
+        collection = next((c for c in collections if int(c["id"]) == int(collection_id)), None)
+        if not collection:
+            return {"ok": False, "error": "Collection not found"}
+
+        added = 0
+        skipped = 0
+        failed = []
+        for bare_name in unique_names:
+            updated = self._sqlite_db_repository.add_recording_to_collection(bare_name, int(collection_id))
+            if updated:
+                added += 1
+            else:
+                skipped += 1
+                failed.append({"name": bare_name, "error": "Recording not found"})
+
+        collection_name = collection["name"]
+        return {
+            "ok": len(failed) == 0,
+            "collection_id": int(collection_id),
+            "collection_name": collection_name,
+            "counts": {
+                "requested": len(unique_names),
+                "added": added,
+                "skipped": skipped,
+                "failed": len(failed),
+            },
+            "failed": failed,
+            "message": f"{added} recordings added to {collection_name}.",
+        }
+
     def remove_recording_from_collection(self, name: str, collection_id: int) -> dict:
         bare_name = self._bare_name(name)
         removed = self._sqlite_db_repository.remove_recording_from_collection(bare_name, collection_id)

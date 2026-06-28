@@ -33,6 +33,7 @@ const MOVE_RECORDING_URL = "/api/dashboard/recording";
 const BULK_MOVE_URL = "/api/dashboard/recordings/move";
 const COLLECTIONS_URL = "/api/dashboard/collections";
 const RECORDING_COLLECTIONS_URL = "/api/dashboard/recording";
+const BULK_RECORDING_COLLECTIONS_URL = "/api/dashboard/recordings/collections";
 const SAVED_VIEWS_URL = "/api/dashboard/saved-views";
 const EMBEDDINGS_GENERATE_URL = "/api/dashboard/embeddings/generate";
 const EMBEDDINGS_COLLECTION_URL = "/api/dashboard/embeddings/generate/collection";
@@ -2025,6 +2026,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const recordingCollectionsFeedback = $("#recording-collections-feedback");
     let _collectionsRecordingName = null;
 
+    const bulkCollectionBackdrop = $("#bulk-collection-modal-backdrop");
+    const bulkCollectionClose = $("#bulk-collection-modal-close");
+    const bulkCollectionCancel = $("#bulk-collection-cancel");
+    const bulkCollectionSave = $("#bulk-collection-save");
+    const bulkCollectionCount = $("#bulk-collection-recording-count");
+    const bulkCollectionList = $("#bulk-collection-list");
+    const bulkCollectionEmpty = $("#bulk-collection-empty");
+    const bulkCollectionFeedback = $("#bulk-collection-feedback");
+    let _bulkCollectionRecordingNames = [];
+
     function openCollectionModal() {
         if (collectionNameInput) collectionNameInput.value = "";
         if (collectionDescriptionInput) collectionDescriptionInput.value = "";
@@ -2112,6 +2123,41 @@ document.addEventListener("DOMContentLoaded", () => {
         _collectionsRecordingName = null;
     }
 
+    function renderBulkCollectionList() {
+        if (!_allCollections || _allCollections.length === 0) {
+            if (bulkCollectionList) bulkCollectionList.innerHTML = "";
+            show(bulkCollectionEmpty);
+            return;
+        }
+        hide(bulkCollectionEmpty);
+        bulkCollectionList.innerHTML = _allCollections.map(collection => {
+            const id = Number(collection.id);
+            return `<div class="form-check mb-2">
+                <input class="form-check-input bulk-collection-radio" type="radio" name="bulk-collection-id"
+                       value="${id}" id="bulk-collection-${id}">
+                <label class="form-check-label" for="bulk-collection-${id}">
+                    ${escapeHtml(collection.name)}
+                    ${collection.description ? `<small class="text-muted d-block">${escapeHtml(collection.description)}</small>` : ""}
+                </label>
+            </div>`;
+        }).join("");
+    }
+
+    function openBulkCollectionModal(names) {
+        _bulkCollectionRecordingNames = names;
+        if (bulkCollectionCount) {
+            bulkCollectionCount.textContent = `Adding ${names.length} selected recording(s). Folder location and files will not change.`;
+        }
+        hide(bulkCollectionFeedback);
+        renderBulkCollectionList();
+        show(bulkCollectionBackdrop);
+    }
+
+    function closeBulkCollectionModal() {
+        hide(bulkCollectionBackdrop);
+        _bulkCollectionRecordingNames = [];
+    }
+
     if (createCollectionBtn) createCollectionBtn.addEventListener("click", (e) => { e.preventDefault(); openCollectionModal(); });
     if (collectionModalClose) collectionModalClose.addEventListener("click", closeCollectionModal);
     if (collectionModalCancel) collectionModalCancel.addEventListener("click", closeCollectionModal);
@@ -2160,6 +2206,50 @@ document.addEventListener("DOMContentLoaded", () => {
             } finally {
                 recordingCollectionsSave.disabled = false;
                 recordingCollectionsSave.innerHTML = '<i class="bi bi-check-lg me-1"></i>Save';
+            }
+        });
+    }
+
+    if (bulkCollectionClose) bulkCollectionClose.addEventListener("click", closeBulkCollectionModal);
+    if (bulkCollectionCancel) bulkCollectionCancel.addEventListener("click", closeBulkCollectionModal);
+    if (bulkCollectionBackdrop) bulkCollectionBackdrop.addEventListener("click", (e) => { if (e.target === bulkCollectionBackdrop) closeBulkCollectionModal(); });
+    if (bulkCollectionSave) {
+        bulkCollectionSave.addEventListener("click", async () => {
+            if (_bulkCollectionRecordingNames.length === 0) return;
+            const selected = document.querySelector(".bulk-collection-radio:checked");
+            if (!selected) {
+                bulkCollectionFeedback.className = "small mt-2 text-danger";
+                bulkCollectionFeedback.textContent = "Choose one collection.";
+                show(bulkCollectionFeedback);
+                return;
+            }
+
+            bulkCollectionSave.disabled = true;
+            bulkCollectionSave.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            hide(bulkCollectionFeedback);
+            try {
+                const res = await fetch(BULK_RECORDING_COLLECTIONS_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        names: _bulkCollectionRecordingNames,
+                        collection_id: Number(selected.value),
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok || !data.ok) {
+                    throw new Error(data.detail || data.error || "Failed to add recordings to collection");
+                }
+                closeBulkCollectionModal();
+                showDashboardAlert("alert-success", `<i class="bi bi-check-circle me-1"></i>${escapeHtml(data.message)}`);
+                await loadDashboard();
+            } catch (err) {
+                bulkCollectionFeedback.className = "small mt-2 text-danger";
+                bulkCollectionFeedback.textContent = `Failed: ${err.message}`;
+                show(bulkCollectionFeedback);
+            } finally {
+                bulkCollectionSave.disabled = false;
+                bulkCollectionSave.innerHTML = '<i class="bi bi-plus-lg me-1"></i>Add';
             }
         });
     }
@@ -2328,6 +2418,15 @@ document.addEventListener("DOMContentLoaded", () => {
             const checked = document.querySelectorAll(".rec-checkbox:checked");
             const names = Array.from(checked).map(cb => cb.dataset.name);
             if (names.length > 0) openMoveFolderModal(names);
+        });
+    }
+
+    const bulkAddCollectionBtn = $("#btn-bulk-add-collection");
+    if (bulkAddCollectionBtn) {
+        bulkAddCollectionBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            const names = selectedRecordingNames();
+            if (names.length > 0) openBulkCollectionModal(names);
         });
     }
 

@@ -654,6 +654,21 @@ class TestDashboardControllerCollections:
         assert result["ok"] is False
         assert "not found" in result["error"].lower()
 
+    def test_bulk_add_recordings_to_collection_success(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].get_collections_with_counts.return_value = [
+            {"id": 9, "name": "Archive / No Speech", "description": None, "count": 0}
+        ]
+        mock_services["sqlite_db"].add_recording_to_collection.return_value = True
+
+        result = ctrl.bulk_add_recordings_to_collection(["a.mp3", "b.hda", "a"], 9)
+
+        assert result["ok"] is True
+        assert result["counts"]["added"] == 2
+        assert result["message"] == "2 recordings added to Archive / No Speech."
+        mock_services["sqlite_db"].add_recording_to_collection.assert_any_call("a", 9)
+        mock_services["sqlite_db"].add_recording_to_collection.assert_any_call("b", 9)
+
     def test_get_recordings_status_includes_collections(self, mock_services):
         ctrl = mock_services["controller"]
         rec = DBRecording(id=1, name="meeting", label="Meeting", duration=10, created_at=datetime.now())

@@ -5,7 +5,11 @@ from fastapi.responses import FileResponse, Response
 
 from app import depends
 from controllers.DashboardController import DashboardController, MIME_TYPES
-from models.dto.CollectionRequestDTO import CreateCollectionRequestDTO, SetRecordingCollectionsRequestDTO
+from models.dto.CollectionRequestDTO import (
+    BulkAddToCollectionRequestDTO,
+    CreateCollectionRequestDTO,
+    SetRecordingCollectionsRequestDTO,
+)
 from models.dto.DeleteRecordingRequestDTO import DeleteRecordingRequestDTO
 from models.dto.BulkImportRequestDTO import BulkImportConfirmRequestDTO, BulkImportPreviewRequestDTO
 from models.dto.FolderRequestDTO import CreateFolderRequestDTO, RenameFolderRequestDTO, DeleteFolderRequestDTO
@@ -456,6 +460,14 @@ async def add_recording_to_collection(
     dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
 ):
     return dashboard_controller.add_recording_to_collection(name, collection_id)
+
+
+@router.post("/recordings/collections")
+async def bulk_add_recordings_to_collection(
+    body: BulkAddToCollectionRequestDTO,
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.bulk_add_recordings_to_collection(body.names, body.collection_id)
 
 
 @router.delete("/recording/{name}/collections/{collection_id}")
