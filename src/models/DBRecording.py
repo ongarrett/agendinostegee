@@ -17,6 +17,14 @@ class DBRecording:
         title: str | None = None,
         tags: str | None = None,
         notion_url: str | None = None,
+        transcription_status: str = "pending",
+        transcription_error: str | None = None,
+        transcription_attempted_at: str | None = None,
+        transcription_segment_count: int | None = None,
+        transcription_language: str | None = None,
+        transcription_language_probability: float | None = None,
+        transcription_vad_removed_duration: float | None = None,
+        transcription_skipped: bool = False,
     ):
         self.id = id
         self.name = name
@@ -32,6 +40,14 @@ class DBRecording:
         self.title = title
         self.tags = tags
         self.notion_url = notion_url
+        self.transcription_status = transcription_status
+        self.transcription_error = transcription_error
+        self.transcription_attempted_at = transcription_attempted_at
+        self.transcription_segment_count = transcription_segment_count
+        self.transcription_language = transcription_language
+        self.transcription_language_probability = transcription_language_probability
+        self.transcription_vad_removed_duration = transcription_vad_removed_duration
+        self.transcription_skipped = transcription_skipped
 
     @staticmethod
     def from_dict(data):
@@ -50,4 +66,20 @@ class DBRecording:
             title=data["title"] if "title" in keys else None,
             tags=data["tags"] if "tags" in keys else None,
             notion_url=data["notion_url"] if "notion_url" in keys else None,
+            transcription_status=data["transcription_status"] if "transcription_status" in keys else "pending",
+            transcription_error=data["transcription_error"] if "transcription_error" in keys else None,
+            transcription_attempted_at=(
+                data["transcription_attempted_at"] if "transcription_attempted_at" in keys else None
+            ),
+            transcription_segment_count=(
+                data["transcription_segment_count"] if "transcription_segment_count" in keys else None
+            ),
+            transcription_language=data["transcription_language"] if "transcription_language" in keys else None,
+            transcription_language_probability=(
+                data["transcription_language_probability"] if "transcription_language_probability" in keys else None
+            ),
+            transcription_vad_removed_duration=(
+                data["transcription_vad_removed_duration"] if "transcription_vad_removed_duration" in keys else None
+            ),
+            transcription_skipped=bool(data["transcription_skipped"]) if "transcription_skipped" in keys else False,
         )

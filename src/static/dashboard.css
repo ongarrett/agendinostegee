@@ -1076,3 +1076,12 @@
         max-height: none;
     }
 }
+.archive-health-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+}
+
+.archive-health-grid span {
+    white-space: nowrap;
+}

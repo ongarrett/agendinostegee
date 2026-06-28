@@ -10,6 +10,23 @@ from models.DBSummary import DBSummary
 from models.DBTask import DBTask
 from models.DBSharedCalendar import DBSharedCalendar
 
+TRANSCRIPTION_STATUSES = {
+    "transcribed",
+    "no_speech_detected",
+    "corrupt_audio",
+    "retryable_failure",
+    "pending",
+    "very_short",
+    "unknown",
+}
+VERY_SHORT_DURATION_SECONDS = 10
+RECORDING_SELECT_COLUMNS = (
+    "id, name, label, duration, file_extension, recorded_at, created_at, transcript, folder, "
+    "transcription_status, transcription_error, transcription_attempted_at, transcription_segment_count, "
+    "transcription_language, transcription_language_probability, transcription_vad_removed_duration, "
+    "transcription_skipped"
+)
+
 
 class SqliteDBRepository:
     def __init__(self, db_name: str, db_path: str, init_sql_script: str):
@@ -22,6 +39,7 @@ class SqliteDBRepository:
         self._ensure_embedding_tables()
         self._ensure_action_center_tables()
         self._ensure_processing_queue_tables()
+        self.backfill_transcription_statuses()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -38,7 +56,7 @@ class SqliteDBRepository:
         conn.close()
 
     def _ensure_recording_columns(self) -> None:
-        """Migration: add file_extension, recorded_at, and folder columns if missing on existing DB."""
+        """Migration: add recording metadata columns if missing on existing DB."""
         conn = self._connect()
         try:
             try:
@@ -56,6 +74,15 @@ class SqliteDBRepository:
             except Exception:
                 conn.execute("ALTER TABLE recording ADD COLUMN folder TEXT NOT NULL DEFAULT '/'")
                 conn.commit()
+            self._ensure_column(conn, "recording", "transcription_status", "TEXT NOT NULL DEFAULT 'pending'")
+            self._ensure_column(conn, "recording", "transcription_error", "TEXT DEFAULT NULL")
+            self._ensure_column(conn, "recording", "transcription_attempted_at", "TEXT DEFAULT NULL")
+            self._ensure_column(conn, "recording", "transcription_segment_count", "INTEGER DEFAULT NULL")
+            self._ensure_column(conn, "recording", "transcription_language", "TEXT DEFAULT NULL")
+            self._ensure_column(conn, "recording", "transcription_language_probability", "REAL DEFAULT NULL")
+            self._ensure_column(conn, "recording", "transcription_vad_removed_duration", "REAL DEFAULT NULL")
+            self._ensure_column(conn, "recording", "transcription_skipped", "INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
         finally:
             conn.close()
 
@@ -225,7 +252,11 @@ class SqliteDBRepository:
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         columns = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
         if column not in columns:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     @staticmethod
     def _migrate_processing_queue_summary_models(conn: sqlite3.Connection) -> None:
@@ -248,13 +279,71 @@ class SqliteDBRepository:
                 (new_model, old_model),
             )
 
+    @staticmethod
+    def _estimate_transcript_segment_count(transcript: str | None) -> int | None:
+        if not transcript or not transcript.strip():
+            return 0 if transcript is not None else None
+        lines = [line for line in transcript.splitlines() if line.strip()]
+        return len(lines) if lines else 1
+
+    @staticmethod
+    def _initial_transcription_status(recording: DBRecording) -> str:
+        if recording.transcript and recording.transcript.strip():
+            if recording.duration and recording.duration <= VERY_SHORT_DURATION_SECONDS:
+                return "very_short"
+            return "transcribed"
+        if recording.duration and recording.duration <= VERY_SHORT_DURATION_SECONDS:
+            return "very_short"
+        return "pending"
+
+    @staticmethod
+    def classify_transcription_error(error: str | None) -> str:
+        text = (error or "").lower()
+        corrupt_markers = (
+            "invalid data found when processing input",
+            "ffmpeg",
+            "decode",
+            "unsupported",
+            "corrupt",
+            "damaged",
+            "averror",
+            "could not open input",
+        )
+        if any(marker in text for marker in corrupt_markers):
+            return "corrupt_audio"
+        if "no speech" in text or "0 segment" in text or "zero segment" in text:
+            return "no_speech_detected"
+        retryable_markers = (
+            "timeout",
+            "timed out",
+            "temporarily",
+            "temporary",
+            "interrupted",
+            "unavailable",
+            "resource exhausted",
+            "rate limit",
+            "connection",
+        )
+        if any(marker in text for marker in retryable_markers):
+            return "retryable_failure"
+        return "retryable_failure"
+
+    @staticmethod
+    def transcription_status_message(status: str | None) -> str:
+        messages = {
+            "corrupt_audio": "This file could not be decoded. It may be damaged or unsupported.",
+            "no_speech_detected": "Whisper completed but detected no speech segments.",
+            "retryable_failure": "This appears retryable. You can run Retry Failed Only.",
+            "pending": "No transcript found. This recording has not been transcribed yet.",
+            "very_short": "This recording is very short or has only a few transcript segments.",
+            "unknown": "The transcription state is unknown.",
+        }
+        return messages.get(status or "unknown", messages["unknown"])
+
     def get_recordings(self) -> list[DBRecording]:
         conn = self._connect()
         try:
-            result = conn.execute(
-                "SELECT id, name, label, duration, file_extension, recorded_at, created_at, transcript, folder "
-                "FROM recording"
-            )
+            result = conn.execute(f"SELECT {RECORDING_SELECT_COLUMNS} FROM recording")
             db_files = result.fetchall()
             recordings = [DBRecording.from_dict(row) for row in db_files]
             for rec in recordings:
@@ -267,8 +356,7 @@ class SqliteDBRepository:
         conn = self._connect()
         try:
             result = conn.execute(
-                "SELECT id, name, label, duration, file_extension, recorded_at, created_at, transcript, folder "
-                "FROM recording WHERE name = ?",
+                f"SELECT {RECORDING_SELECT_COLUMNS} FROM recording WHERE name = ?",
                 (name,),
             )
             row = result.fetchone()
@@ -301,9 +389,15 @@ class SqliteDBRepository:
     def insert_recording(self, db_recording: DBRecording) -> int:
         conn = self._connect()
         try:
+            status = self._initial_transcription_status(db_recording)
             result = conn.execute(
-                "INSERT INTO recording (id, name, label, duration, file_extension, created_at, transcript, folder) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                """
+                INSERT INTO recording (
+                    id, name, label, duration, file_extension, created_at, transcript, folder,
+                    transcription_status, transcription_segment_count
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     db_recording.id,
                     db_recording.name,
@@ -313,6 +407,8 @@ class SqliteDBRepository:
                     db_recording.created_at,
                     db_recording.transcript,
                     db_recording.folder,
+                    status,
+                    self._estimate_transcript_segment_count(db_recording.transcript),
                 ),
             )
             conn.commit()
@@ -323,7 +419,27 @@ class SqliteDBRepository:
     def save_transcript(self, name: str, transcript: str) -> None:
         conn = self._connect()
         try:
-            conn.execute("UPDATE recording SET transcript = ? WHERE name = ?", (transcript, name))
+            segment_count = self._estimate_transcript_segment_count(transcript)
+            recording = conn.execute("SELECT duration FROM recording WHERE name = ?", (name,)).fetchone()
+            duration = int(recording["duration"] or 0) if recording else 0
+            status = "transcribed"
+            if not transcript or not transcript.strip():
+                status = "no_speech_detected"
+            elif duration and duration <= VERY_SHORT_DURATION_SECONDS:
+                status = "very_short"
+            conn.execute(
+                """
+                UPDATE recording
+                SET transcript = ?,
+                    transcription_status = ?,
+                    transcription_error = NULL,
+                    transcription_attempted_at = COALESCE(transcription_attempted_at, datetime('now')),
+                    transcription_segment_count = ?,
+                    transcription_skipped = 0
+                WHERE name = ?
+                """,
+                (transcript, status, segment_count, name),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -355,7 +471,26 @@ class SqliteDBRepository:
     def update_transcript(self, name: str, transcript: str) -> bool:
         conn = self._connect()
         try:
-            result = conn.execute("UPDATE recording SET transcript = ? WHERE name = ?", (transcript, name))
+            segment_count = self._estimate_transcript_segment_count(transcript)
+            recording = conn.execute("SELECT duration FROM recording WHERE name = ?", (name,)).fetchone()
+            duration = int(recording["duration"] or 0) if recording else 0
+            status = "transcribed"
+            if not transcript or not transcript.strip():
+                status = "no_speech_detected"
+            elif duration and duration <= VERY_SHORT_DURATION_SECONDS:
+                status = "very_short"
+            result = conn.execute(
+                """
+                UPDATE recording
+                SET transcript = ?,
+                    transcription_status = ?,
+                    transcription_error = NULL,
+                    transcription_segment_count = ?,
+                    transcription_skipped = 0
+                WHERE name = ?
+                """,
+                (transcript, status, segment_count, name),
+            )
             conn.commit()
             return result.rowcount > 0
         finally:
@@ -371,6 +506,192 @@ class SqliteDBRepository:
             return None
         finally:
             conn.close()
+
+    def update_transcription_metadata(
+        self,
+        name: str,
+        status: str,
+        error: str | None = None,
+        segment_count: int | None = None,
+        language: str | None = None,
+        language_probability: float | None = None,
+        vad_removed_duration: float | None = None,
+        attempted: bool = True,
+        skipped: bool | None = None,
+    ) -> bool:
+        if status not in TRANSCRIPTION_STATUSES:
+            status = "unknown"
+        conn = self._connect()
+        try:
+            assignments = [
+                "transcription_status = ?",
+                "transcription_error = ?",
+                "transcription_segment_count = ?",
+                "transcription_language = ?",
+                "transcription_language_probability = ?",
+                "transcription_vad_removed_duration = ?",
+            ]
+            params = [status, error, segment_count, language, language_probability, vad_removed_duration]
+            if attempted:
+                assignments.append("transcription_attempted_at = datetime('now')")
+            if skipped is not None:
+                assignments.append("transcription_skipped = ?")
+                params.append(1 if skipped else 0)
+            params.append(name)
+            result = conn.execute(
+                f"UPDATE recording SET {', '.join(assignments)} WHERE name = ?",
+                params,
+            )
+            conn.commit()
+            return result.rowcount > 0
+        finally:
+            conn.close()
+
+    def mark_no_speech_as_skipped(self) -> dict:
+        conn = self._connect()
+        try:
+            result = conn.execute("""
+                UPDATE recording
+                SET transcription_skipped = 1
+                WHERE transcription_status = 'no_speech_detected'
+                """)
+            conn.commit()
+            return {"ok": True, "count": result.rowcount}
+        finally:
+            conn.close()
+
+    def backfill_transcription_statuses(self) -> dict:
+        """Classify existing rows from transcript text, duration, and failed queue errors only."""
+        conn = self._connect()
+        counts = {
+            "transcribed": 0,
+            "very_short": 0,
+            "pending": 0,
+            "retryable_failure": 0,
+            "corrupt_audio": 0,
+            "no_speech_detected": 0,
+            "unknown": 0,
+        }
+        try:
+            rows = conn.execute("""
+                SELECT id, name, duration, transcript, transcription_status
+                FROM recording
+                """).fetchall()
+            for row in rows:
+                existing = row["transcription_status"] or "pending"
+                if existing in ("corrupt_audio", "retryable_failure", "no_speech_detected") and not row["transcript"]:
+                    counts[existing] += 1
+                    continue
+
+                error_row = conn.execute(
+                    """
+                    SELECT error, completed_at, updated_at
+                    FROM processing_queue
+                    WHERE recording_id = ?
+                      AND job_type = 'transcribe'
+                      AND status = 'failed'
+                      AND error IS NOT NULL
+                    ORDER BY COALESCE(completed_at, updated_at, created_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (row["id"],),
+                ).fetchone()
+                transcript = row["transcript"]
+                segment_count = self._estimate_transcript_segment_count(transcript)
+                if transcript and transcript.strip():
+                    status = "transcribed"
+                    if row["duration"] and int(row["duration"]) <= VERY_SHORT_DURATION_SECONDS:
+                        status = "very_short"
+                    error = None
+                    attempted_at = None
+                elif error_row:
+                    error = error_row["error"]
+                    status = self.classify_transcription_error(error)
+                    attempted_at = error_row["completed_at"] or error_row["updated_at"]
+                elif row["duration"] and int(row["duration"]) <= VERY_SHORT_DURATION_SECONDS:
+                    status = "very_short"
+                    error = None
+                    attempted_at = None
+                else:
+                    status = "pending"
+                    error = None
+                    attempted_at = None
+
+                counts[status] = counts.get(status, 0) + 1
+                conn.execute(
+                    """
+                    UPDATE recording
+                    SET transcription_status = ?,
+                        transcription_error = ?,
+                        transcription_segment_count = ?,
+                        transcription_attempted_at = COALESCE(transcription_attempted_at, ?)
+                    WHERE id = ?
+                    """,
+                    (status, error, segment_count, attempted_at, row["id"]),
+                )
+            conn.commit()
+            return {"ok": True, "counts": counts}
+        finally:
+            conn.close()
+
+    def get_transcription_failure_report(self) -> list[dict]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT
+                    r.name,
+                    r.label,
+                    r.duration,
+                    r.recorded_at,
+                    r.created_at,
+                    r.file_extension,
+                    r.transcription_status,
+                    r.transcription_error,
+                    r.transcription_segment_count,
+                    r.transcription_language,
+                    r.transcription_language_probability,
+                    r.transcription_skipped
+                FROM recording r
+                WHERE r.transcription_status IN (
+                    'pending',
+                    'retryable_failure',
+                    'corrupt_audio',
+                    'no_speech_detected',
+                    'very_short',
+                    'unknown'
+                )
+                ORDER BY COALESCE(r.recorded_at, r.created_at) DESC, r.name
+                """).fetchall()
+            return [self._transcription_report_row(row) for row in rows]
+        finally:
+            conn.close()
+
+    @classmethod
+    def _transcription_report_row(cls, row: sqlite3.Row) -> dict:
+        status = row["transcription_status"] or "unknown"
+        recommendations = {
+            "pending": "Retry never attempted",
+            "retryable_failure": "Retry failed only",
+            "corrupt_audio": "Review or replace source audio",
+            "no_speech_detected": (
+                "Mark no speech as skipped" if not row["transcription_skipped"] else "Already skipped"
+            ),
+            "very_short": "Review if valuable",
+            "unknown": "Review manually",
+        }
+        return {
+            "recording_name": row["name"],
+            "title": row["label"],
+            "date": row["recorded_at"] or row["created_at"],
+            "file_path": f"local_recordings/{row['name']}.{row['file_extension']}",
+            "transcription_status": status,
+            "segment_count": row["transcription_segment_count"],
+            "duration": row["duration"],
+            "language": row["transcription_language"],
+            "language_probability": row["transcription_language_probability"],
+            "error_message": row["transcription_error"],
+            "recommended_action": recommendations.get(status, "Review manually"),
+        }
 
     @staticmethod
     def _next_summary_version(conn: sqlite3.Connection, recording_id: int) -> int:
@@ -2561,6 +2882,44 @@ class SqliteDBRepository:
                 FROM recording r
                 {collection_join}
                 WHERE (r.transcript IS NULL OR trim(r.transcript) = '')
+                  AND COALESCE(r.transcription_status, 'pending') IN ('pending', 'retryable_failure', 'unknown')
+                  {collection_where}
+                ORDER BY COALESCE(r.recorded_at, r.created_at) DESC, r.id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            return [row["name"] for row in rows]
+        finally:
+            conn.close()
+
+    def get_recording_names_by_transcription_status(
+        self,
+        statuses: list[str],
+        limit: int | None = None,
+        collection_id: int | None = None,
+    ) -> list[str]:
+        clean_statuses = [status for status in statuses if status in TRANSCRIPTION_STATUSES]
+        if not clean_statuses:
+            return []
+        conn = self._connect()
+        try:
+            params: list[object] = clean_statuses.copy()
+            collection_join = ""
+            collection_where = ""
+            if collection_id is not None:
+                collection_join = "JOIN recording_collection rc ON rc.recording_id = r.id"
+                collection_where = "AND rc.collection_id = ?"
+                params.append(collection_id)
+            params.append(limit if limit is not None else -1)
+            placeholders = ",".join(["?"] * len(clean_statuses))
+            rows = conn.execute(
+                f"""
+                SELECT r.name
+                FROM recording r
+                {collection_join}
+                WHERE COALESCE(r.transcription_status, 'pending') IN ({placeholders})
+                  AND (r.transcript IS NULL OR trim(r.transcript) = '')
                   {collection_where}
                 ORDER BY COALESCE(r.recorded_at, r.created_at) DESC, r.id DESC
                 LIMIT ?

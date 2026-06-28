@@ -49,7 +49,7 @@ def insert_recording(db, name, days_old=0, transcript=None, summary=None):
             id=None,
             name=name,
             label=name,
-            duration=10,
+            duration=60,
             created_at=datetime.now() - timedelta(days=days_old),
             transcript=transcript,
         )
@@ -167,6 +167,22 @@ def test_duplicate_pending_jobs_are_skipped(queue_db):
     assert first["counts"]["enqueued"] == 1
     assert second["counts"]["enqueued"] == 0
     assert second["counts"]["skipped_active"] == 1
+
+
+def test_retry_failed_only_queues_retryable_failures_not_corrupt_or_no_speech(queue_db):
+    insert_recording(queue_db, "retryable")
+    insert_recording(queue_db, "corrupt")
+    insert_recording(queue_db, "silent")
+    queue_db.update_transcription_metadata("retryable", "retryable_failure", error="timed out")
+    queue_db.update_transcription_metadata("corrupt", "corrupt_audio", error="Invalid data found")
+    queue_db.update_transcription_metadata("silent", "no_speech_detected", segment_count=0)
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    result = service.enqueue_transcribe_retryable_failures()
+    jobs = service.list_jobs()["jobs"]
+
+    assert result["counts"]["enqueued"] == 1
+    assert [job["recording_name"] for job in jobs] == ["retryable"]
 
 
 def test_process_next_updates_completed_and_failed_statuses(queue_db):

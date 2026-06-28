@@ -8,7 +8,15 @@ CREATE TABLE IF NOT EXISTS recording
     recorded_at     TEXT    DEFAULT NULL,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
     transcript      TEXT    DEFAULT NULL,
-    folder          TEXT    NOT NULL DEFAULT '/'
+    folder          TEXT    NOT NULL DEFAULT '/',
+    transcription_status TEXT NOT NULL DEFAULT 'pending',
+    transcription_error TEXT DEFAULT NULL,
+    transcription_attempted_at TEXT DEFAULT NULL,
+    transcription_segment_count INTEGER DEFAULT NULL,
+    transcription_language TEXT DEFAULT NULL,
+    transcription_language_probability REAL DEFAULT NULL,
+    transcription_vad_removed_duration REAL DEFAULT NULL,
+    transcription_skipped INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS summary

@@ -12,6 +12,7 @@ class WhisperTranscriptionService:
         self._device = device
         self._compute_type = compute_type
         self._model = None  # lazy-loaded
+        self.last_result: dict = {}
 
     def _get_model(self):
         if self._model is None:
@@ -60,6 +61,12 @@ class WhisperTranscriptionService:
                 lines.append(f"[{ts}] {text}")
 
         transcript = "\n".join(lines)
+        self.last_result = {
+            "segment_count": len(lines),
+            "language": getattr(info, "language", None),
+            "language_probability": getattr(info, "language_probability", None),
+            "vad_removed_duration": getattr(info, "vad_removed_duration", None),
+        }
         logger.info("Whisper transcription complete (%d segments).", len(lines))
         return transcript
 

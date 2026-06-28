@@ -37,6 +37,16 @@ class ProcessingQueueService:
         result = self._sqlite_db_repository.enqueue_processing_jobs("transcribe", names, engine=engine)
         return self._with_selection_count(result, len(names))
 
+    def enqueue_transcribe_retryable_failures(self, engine: str = "whisper") -> dict:
+        names = self._sqlite_db_repository.get_recording_names_by_transcription_status(["retryable_failure"])
+        result = self._sqlite_db_repository.enqueue_processing_jobs("transcribe", names, engine=engine)
+        return self._with_selection_count(result, len(names))
+
+    def enqueue_transcribe_pending(self, engine: str = "whisper") -> dict:
+        names = self._sqlite_db_repository.get_recording_names_by_transcription_status(["pending"])
+        result = self._sqlite_db_repository.enqueue_processing_jobs("transcribe", names, engine=engine)
+        return self._with_selection_count(result, len(names))
+
     def enqueue_summarize_newest(
         self,
         limit: int,

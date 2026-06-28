@@ -41,6 +41,22 @@ async def enqueue_transcribe_collection(
     return processing_queue_service.enqueue_transcribe_collection(body.collection_id, engine=body.engine)
 
 
+@router.post("/enqueue/transcribe-retryable")
+async def enqueue_transcribe_retryable_failures(
+    body: QueueTranscriptionRequestDTO = QueueTranscriptionRequestDTO(),
+    processing_queue_service: ProcessingQueueService = Depends(depends.get_processing_queue_service),
+):
+    return processing_queue_service.enqueue_transcribe_retryable_failures(engine=body.engine)
+
+
+@router.post("/enqueue/transcribe-pending")
+async def enqueue_transcribe_pending(
+    body: QueueTranscriptionRequestDTO = QueueTranscriptionRequestDTO(),
+    processing_queue_service: ProcessingQueueService = Depends(depends.get_processing_queue_service),
+):
+    return processing_queue_service.enqueue_transcribe_pending(engine=body.engine)
+
+
 @router.post("/enqueue/summarize-newest")
 async def enqueue_summarize_newest(
     body: QueueSummarizationRequestDTO,

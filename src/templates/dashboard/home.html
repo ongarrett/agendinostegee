@@ -87,6 +87,25 @@
                         </div>
                     </div>
 
+                    <div class="row mb-4" id="archive-health-row">
+                        <div class="col-12">
+                            <div class="card archive-health-card">
+                                <div class="card-body py-2">
+                                    <div class="archive-health-grid small">
+                                        <span><strong id="health-total">-</strong> total</span>
+                                        <span><strong id="health-transcribed">-</strong> transcribed</span>
+                                        <span><strong id="health-pending">-</strong> pending</span>
+                                        <span><strong id="health-retryable">-</strong> retryable failures</span>
+                                        <span><strong id="health-no-speech">-</strong> no speech</span>
+                                        <span><strong id="health-corrupt">-</strong> corrupt audio</span>
+                                        <span><strong id="health-very-short">-</strong> very short</span>
+                                        <span><strong id="health-missing-summary">-</strong> missing summaries</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Sync Result -->
                     <div class="row">
                         <div class="col-12">
@@ -158,6 +177,20 @@
                                                     <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
                                                     <input type="date" class="form-control" id="recording-date-filter">
                                                 </div>
+                                                <div class="input-group input-group-sm" style="max-width: 260px;">
+                                                    <span class="input-group-text"><i class="bi bi-clipboard-pulse"></i></span>
+                                                    <select class="form-select" id="recording-status-filter">
+                                                        <option value="">All transcript states</option>
+                                                        <option value="transcribed">Transcribed</option>
+                                                        <option value="untranscribed">Untranscribed</option>
+                                                        <option value="retryable_failure">Retryable failures</option>
+                                                        <option value="corrupt_audio">Corrupt audio</option>
+                                                        <option value="no_speech_detected">No speech detected</option>
+                                                        <option value="very_short">Very short / low-value</option>
+                                                        <option value="missing_summary">Missing summaries</option>
+                                                        <option value="missing_embedding">Missing embeddings</option>
+                                                    </select>
+                                                </div>
                                                 <div class="input-group input-group-sm" style="max-width: 360px;">
                                                     <span class="input-group-text"><i class="bi bi-diagram-3"></i></span>
                                                     <input type="search" class="form-control" id="semantic-search-input"
@@ -204,6 +237,18 @@
                                                         <button class="dropdown-item" type="button" id="btn-queue-transcribe-collection">
                                                             Transcribe Collection
                                                         </button>
+                                                        <button class="dropdown-item" type="button" id="btn-queue-retry-failed">
+                                                            Retry Failed Only
+                                                        </button>
+                                                        <button class="dropdown-item" type="button" id="btn-queue-retry-pending">
+                                                            Retry Never Attempted
+                                                        </button>
+                                                        <button class="dropdown-item" type="button" id="btn-mark-no-speech-skipped">
+                                                            Mark No Speech as Skipped
+                                                        </button>
+                                                        <a class="dropdown-item" href="/api/dashboard/transcription/failure-report.csv" id="btn-export-failure-report">
+                                                            Export Failure Report
+                                                        </a>
                                                         <div class="dropdown-divider"></div>
                                                         <h6 class="dropdown-header">Summaries</h6>
                                                         <button class="dropdown-item" type="button" id="btn-queue-summarize-25">
@@ -240,6 +285,7 @@
                                                         <th>Name</th>
                                                         <th>Date</th>
                                                         <th>Duration</th>
+                                                        <th class="text-center">Transcript</th>
                                                         <th>Size</th>
                                                         <th class="text-center">Type</th>
                                                         <th class="text-center">Device</th>

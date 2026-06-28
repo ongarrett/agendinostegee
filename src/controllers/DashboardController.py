@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import time
+import csv
+from io import StringIO
 from datetime import datetime
 
 from fastapi import Request
@@ -17,6 +19,8 @@ from services.TaskGenerationService import TaskGenerationService
 from services.TranscriptionService import TranscriptionService
 from services.WhisperTranscriptionService import WhisperTranscriptionService
 from services.OllamaSummarizationService import OllamaSummarizationService
+
+VERY_SHORT_DURATION_SECONDS = 10
 
 MIME_TYPES = {
     "hda": "audio/mpeg",
@@ -91,6 +95,56 @@ class DashboardController:
 
     def list_local_recordings(self):
         return self._local_recordings_repository.get_all()
+
+    @staticmethod
+    def _transcription_status_message(status: str | None) -> str:
+        messages = {
+            "corrupt_audio": "This file could not be decoded. It may be damaged or unsupported.",
+            "no_speech_detected": "Whisper completed but detected no speech segments.",
+            "retryable_failure": "This appears retryable. You can run Retry Failed Only.",
+            "pending": "No transcript found. This recording has not been transcribed yet.",
+            "very_short": "This recording is very short or has only a few transcript segments.",
+            "transcribed": "Successfully transcribed.",
+            "unknown": "The transcription state is unknown.",
+        }
+        return messages.get(status or "unknown", messages["unknown"])
+
+    @staticmethod
+    def _archive_health_counts(recordings: list[dict]) -> dict:
+        db_recordings = [rec for rec in recordings if rec.get("in_db")]
+        counts = {
+            "total_recordings": len(recordings),
+            "transcribed": 0,
+            "pending_transcription": 0,
+            "retryable_failures": 0,
+            "no_speech_detected": 0,
+            "corrupt_audio": 0,
+            "very_short": 0,
+            "unknown_transcription": 0,
+            "missing_summaries": 0,
+            "missing_embeddings": 0,
+        }
+        for rec in db_recordings:
+            status = rec.get("transcription_status") or "unknown"
+            if rec.get("has_transcript"):
+                counts["transcribed"] += 1
+            if status == "pending":
+                counts["pending_transcription"] += 1
+            elif status == "retryable_failure":
+                counts["retryable_failures"] += 1
+            elif status == "no_speech_detected":
+                counts["no_speech_detected"] += 1
+            elif status == "corrupt_audio":
+                counts["corrupt_audio"] += 1
+            elif status == "very_short":
+                counts["very_short"] += 1
+            elif status == "unknown":
+                counts["unknown_transcription"] += 1
+            if rec.get("has_transcript") and not rec.get("has_summary"):
+                counts["missing_summaries"] += 1
+            if rec.get("embedding_status") != "indexed":
+                counts["missing_embeddings"] += 1
+        return counts
 
     def get_recordings_status(self) -> dict:
         local_files = self._local_recordings_repository.get_all()
@@ -188,11 +242,25 @@ class DashboardController:
                     "embedding_model": embedding_statuses.get(bare_name, {}).get("model"),
                     "embedding_error": embedding_statuses.get(bare_name, {}).get("error"),
                     "embedding_indexed_at": embedding_statuses.get(bare_name, {}).get("indexed_at"),
+                    "transcription_status": db_rec.transcription_status if db_rec else "pending",
+                    "transcription_error": db_rec.transcription_error if db_rec else None,
+                    "transcription_attempted_at": db_rec.transcription_attempted_at if db_rec else None,
+                    "transcription_segment_count": db_rec.transcription_segment_count if db_rec else None,
+                    "transcription_language": db_rec.transcription_language if db_rec else None,
+                    "transcription_language_probability": (
+                        db_rec.transcription_language_probability if db_rec else None
+                    ),
+                    "transcription_skipped": db_rec.transcription_skipped if db_rec else False,
+                    "transcription_message": self._transcription_status_message(
+                        db_rec.transcription_status if db_rec else "pending"
+                    ),
                 }
             )
 
         # Build folder tree
         folders = self._sqlite_db_repository.get_recording_folders()
+
+        archive_counts = self._archive_health_counts(recordings)
 
         return {
             "device": {
@@ -204,6 +272,7 @@ class DashboardController:
                 "device": 0,
                 "local": len(local_files),
                 "db": len(db_recordings),
+                **archive_counts,
             },
             "recordings": recordings,
             "folders": folders,
@@ -348,7 +417,12 @@ class DashboardController:
 
         db_rec = self._sqlite_db_repository.get_recording_by_name(bare_name)
         if db_rec and db_rec.transcript:
-            return {"ok": True, "transcript": db_rec.transcript, "cached": True}
+            return {
+                "ok": True,
+                "transcript": db_rec.transcript,
+                "cached": True,
+                "transcription_status": db_rec.transcription_status,
+            }
 
         audio_path = self._local_recordings_repository.get_path(local_filename)
         mime_type = MIME_TYPES.get(file_ext, "audio/mpeg")
@@ -364,20 +438,72 @@ class DashboardController:
         try:
             transcript = svc.transcribe(audio_path, mime_type=mime_type)
         except Exception as e:
-            return {"ok": False, "error": f"Transcription failed: {str(e)}"}
+            error = f"Transcription failed: {str(e)}"
+            status = self._classify_transcription_error(error)
+            self._sqlite_db_repository.update_transcription_metadata(
+                bare_name,
+                status,
+                error=error,
+                attempted=True,
+                skipped=False,
+            )
+            return {
+                "ok": False,
+                "error": error,
+                "transcription_status": status,
+                "transcription_message": self._transcription_status_message(status),
+            }
 
+        metadata = getattr(svc, "last_result", {}) if engine == "whisper" else {}
+        status = self._classify_transcription_success(transcript, db_rec, metadata)
         self._sqlite_db_repository.save_transcript(bare_name, transcript)
-        return {"ok": True, "transcript": transcript, "cached": False}
+        self._sqlite_db_repository.update_transcription_metadata(
+            bare_name,
+            status,
+            error=None,
+            segment_count=metadata.get("segment_count"),
+            language=metadata.get("language"),
+            language_probability=metadata.get("language_probability"),
+            vad_removed_duration=metadata.get("vad_removed_duration"),
+            attempted=True,
+            skipped=False,
+        )
+        return {
+            "ok": True,
+            "transcript": transcript,
+            "cached": False,
+            "transcription_status": status,
+            "transcription_message": self._transcription_status_message(status),
+            "metadata": metadata,
+        }
 
     @staticmethod
     def _has_saved_transcript(db_rec) -> bool:
         return db_rec is not None and db_rec.transcript is not None and len(db_rec.transcript) > 0
+
+    @staticmethod
+    def _classify_transcription_error(error: str) -> str:
+        return SqliteDBRepository.classify_transcription_error(error)
+
+    @staticmethod
+    def _classify_transcription_success(transcript: str, db_rec: DBRecording | None, metadata: dict) -> str:
+        segment_count = metadata.get("segment_count")
+        duration = db_rec.duration if db_rec else None
+        if not transcript or not transcript.strip() or segment_count == 0:
+            return "no_speech_detected"
+        if (duration and duration <= VERY_SHORT_DURATION_SECONDS) or (
+            segment_count is not None and 1 <= segment_count <= 3
+        ):
+            return "very_short"
+        return "transcribed"
 
     def list_untranscribed_recordings(self) -> dict:
         recordings = self._sqlite_db_repository.get_recordings()
         untranscribed = []
         for rec in recordings:
             if self._has_saved_transcript(rec):
+                continue
+            if rec.transcription_status not in ("pending", "retryable_failure", "unknown"):
                 continue
             local_filename, _ = self._resolve_local_filename(rec.name)
             if not self._local_recordings_repository.exists(local_filename):
@@ -388,6 +514,8 @@ class DashboardController:
                     "label": rec.label,
                     "file_extension": rec.file_extension,
                     "recorded_at": rec.recorded_at,
+                    "transcription_status": rec.transcription_status,
+                    "transcription_error": rec.transcription_error,
                 }
             )
         return {"ok": True, "count": len(untranscribed), "recordings": untranscribed}
@@ -405,7 +533,15 @@ class DashboardController:
             return {"ok": False, "error": "No recordings selected"}
 
         results = []
-        counts = {"transcribed": 0, "skipped_existing": 0, "failed": 0}
+        counts = {
+            "transcribed": 0,
+            "very_short": 0,
+            "no_speech_detected": 0,
+            "corrupt_audio": 0,
+            "retryable_failure": 0,
+            "skipped_existing": 0,
+            "failed": 0,
+        }
 
         for bare_name in unique_names:
             db_rec = self._sqlite_db_repository.get_recording_by_name(bare_name)
@@ -424,16 +560,34 @@ class DashboardController:
                 if result.get("cached"):
                     counts["skipped_existing"] += 1
                     results.append({"name": bare_name, "status": "skipped_existing"})
+                elif result.get("transcription_status") == "no_speech_detected":
+                    counts["no_speech_detected"] += 1
+                    results.append(
+                        {
+                            "name": bare_name,
+                            "status": "no_speech_detected",
+                            "message": result.get("transcription_message"),
+                        }
+                    )
+                elif result.get("transcription_status") == "very_short":
+                    counts["very_short"] += 1
+                    results.append({"name": bare_name, "status": "very_short"})
                 else:
                     counts["transcribed"] += 1
-                    results.append({"name": bare_name, "status": "transcribed"})
+                    results.append({"name": bare_name, "status": result.get("transcription_status", "transcribed")})
             else:
+                status = result.get("transcription_status", "retryable_failure")
+                if status == "corrupt_audio":
+                    counts["corrupt_audio"] += 1
+                elif status == "retryable_failure":
+                    counts["retryable_failure"] += 1
                 counts["failed"] += 1
                 results.append(
                     {
                         "name": bare_name,
-                        "status": "failed",
+                        "status": status,
                         "error": result.get("error", "Transcription failed"),
+                        "message": result.get("transcription_message"),
                     }
                 )
 
@@ -445,11 +599,48 @@ class DashboardController:
         if not names:
             return {
                 "ok": True,
-                "counts": {"transcribed": 0, "skipped_existing": 0, "failed": 0},
+                "counts": {
+                    "transcribed": 0,
+                    "very_short": 0,
+                    "no_speech_detected": 0,
+                    "corrupt_audio": 0,
+                    "retryable_failure": 0,
+                    "skipped_existing": 0,
+                    "failed": 0,
+                },
                 "results": [],
                 "message": "No untranscribed local recordings found.",
             }
         return self.transcribe_recordings(names, engine=engine)
+
+    def mark_no_speech_as_skipped(self) -> dict:
+        result = self._sqlite_db_repository.mark_no_speech_as_skipped()
+        return {
+            **result,
+            "message": f"Marked {result.get('count', 0)} no-speech recording(s) as skipped.",
+        }
+
+    def export_transcription_failure_report_csv(self) -> str:
+        rows = self._sqlite_db_repository.get_transcription_failure_report()
+        fieldnames = [
+            "recording_name",
+            "title",
+            "date",
+            "file_path",
+            "transcription_status",
+            "segment_count",
+            "duration",
+            "language",
+            "language_probability",
+            "error_message",
+            "recommended_action",
+        ]
+        output = StringIO()
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field) for field in fieldnames})
+        return output.getvalue()
 
     def get_audio_file_path(self, name: str) -> tuple[str | None, str]:
         """Return (file_path, file_extension) or (None, '') if not found."""
@@ -461,10 +652,22 @@ class DashboardController:
 
     def get_transcript(self, name: str) -> dict:
         bare_name = self._bare_name(name)
+        rec = self._sqlite_db_repository.get_recording_by_name(bare_name)
+        rec = rec if isinstance(rec, DBRecording) else None
         transcript = self._sqlite_db_repository.get_transcript(bare_name)
         if transcript:
-            return {"ok": True, "transcript": transcript}
-        return {"ok": False, "error": "No transcript found"}
+            return {
+                "ok": True,
+                "transcript": transcript,
+                "transcription_status": rec.transcription_status if rec else "transcribed",
+            }
+        status = rec.transcription_status if rec else "pending"
+        return {
+            "ok": False,
+            "error": self._transcription_status_message(status),
+            "transcription_status": status,
+            "transcription_error": rec.transcription_error if rec else None,
+        }
 
     def update_transcript(self, name: str, transcript: str) -> dict:
         bare_name = self._bare_name(name)

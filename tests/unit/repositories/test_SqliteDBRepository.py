@@ -59,6 +59,52 @@ class TestSqliteDBRepository:
         transcript = db.get_transcript(sample_recording.name)
         assert transcript == "Hello, this is a transcript."
 
+        rec = db.get_recording_by_name(sample_recording.name)
+        assert rec.transcription_status == "transcribed"
+        assert rec.transcription_segment_count == 1
+
+    def test_update_transcription_metadata_for_corrupt_audio(self, db, sample_recording):
+        db.insert_recording(sample_recording)
+
+        updated = db.update_transcription_metadata(
+            sample_recording.name,
+            "corrupt_audio",
+            error="Invalid data found when processing input",
+        )
+
+        rec = db.get_recording_by_name(sample_recording.name)
+        assert updated is True
+        assert rec.transcription_status == "corrupt_audio"
+        assert "Invalid data" in rec.transcription_error
+        assert rec.transcription_attempted_at is not None
+
+    def test_failure_report_includes_recommended_action(self, db, sample_recording):
+        db.insert_recording(sample_recording)
+        db.update_transcription_metadata(sample_recording.name, "retryable_failure", error="timed out")
+
+        report = db.get_transcription_failure_report()
+
+        assert len(report) == 1
+        assert report[0]["recording_name"] == sample_recording.name
+        assert report[0]["transcription_status"] == "retryable_failure"
+        assert report[0]["recommended_action"] == "Retry failed only"
+
+    def test_backfill_classifies_failed_transcription_queue_errors(self, db, sample_recording):
+        db.insert_recording(sample_recording)
+        db.enqueue_processing_jobs("transcribe", [sample_recording.name], engine="whisper")
+        job = db.claim_next_processing_queue_job()
+        db.update_processing_queue_job_status(
+            job["id"],
+            "failed",
+            error="FFmpeg decode error: Invalid data found when processing input",
+        )
+
+        result = db.backfill_transcription_statuses()
+        rec = db.get_recording_by_name(sample_recording.name)
+
+        assert result["ok"] is True
+        assert rec.transcription_status == "corrupt_audio"
+
     def test_update_transcript(self, db, sample_recording):
         db.insert_recording(sample_recording)
         db.save_transcript(sample_recording.name, "Before")

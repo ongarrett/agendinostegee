@@ -183,6 +183,76 @@ class TestDashboardControllerTranscribeRecording:
         assert result["ok"] is False
         assert "Transcription failed" in result["error"]
 
+    def test_corrupt_audio_failure_is_classified(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["local_repo"].exists.return_value = True
+        mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
+            id=1, name="bad", label="Bad", duration=20, created_at=datetime.now(), transcript=None
+        )
+        mock_services["local_repo"].get_path.return_value = "/path/to/bad.mp3"
+        mock_services["transcription_service"].transcribe.side_effect = RuntimeError(
+            "Invalid data found when processing input"
+        )
+
+        result = ctrl.transcribe_recording("bad")
+
+        assert result["ok"] is False
+        assert result["transcription_status"] == "corrupt_audio"
+        mock_services["sqlite_db"].update_transcription_metadata.assert_called_once()
+        assert mock_services["sqlite_db"].update_transcription_metadata.call_args.args[1] == "corrupt_audio"
+
+    def test_retryable_failure_is_classified(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["local_repo"].exists.return_value = True
+        mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
+            id=1, name="retry", label="Retry", duration=20, created_at=datetime.now(), transcript=None
+        )
+        mock_services["local_repo"].get_path.return_value = "/path/to/retry.mp3"
+        mock_services["transcription_service"].transcribe.side_effect = TimeoutError("timed out")
+
+        result = ctrl.transcribe_recording("retry")
+
+        assert result["ok"] is False
+        assert result["transcription_status"] == "retryable_failure"
+
+    def test_zero_segment_whisper_result_is_no_speech(self, mock_services):
+        ctrl = mock_services["controller"]
+        whisper = MagicMock()
+        whisper.transcribe.return_value = ""
+        whisper.last_result = {"segment_count": 0, "language": "en", "language_probability": 0.91}
+        ctrl._whisper_transcription_service = whisper
+        mock_services["local_repo"].exists.return_value = True
+        mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
+            id=1, name="silent", label="Silent", duration=60, created_at=datetime.now(), transcript=None
+        )
+        mock_services["local_repo"].get_path.return_value = "/path/to/silent.mp3"
+
+        result = ctrl.transcribe_recording("silent", engine="whisper")
+
+        assert result["ok"] is True
+        assert result["transcription_status"] == "no_speech_detected"
+        mock_services["sqlite_db"].update_transcription_metadata.assert_called_once()
+        kwargs = mock_services["sqlite_db"].update_transcription_metadata.call_args.kwargs
+        assert kwargs["segment_count"] == 0
+        assert kwargs["language"] == "en"
+
+    def test_short_whisper_result_is_very_short(self, mock_services):
+        ctrl = mock_services["controller"]
+        whisper = MagicMock()
+        whisper.transcribe.return_value = "[00:00] Hello\n[00:02] Done"
+        whisper.last_result = {"segment_count": 2, "language": "en", "language_probability": 0.95}
+        ctrl._whisper_transcription_service = whisper
+        mock_services["local_repo"].exists.return_value = True
+        mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
+            id=1, name="short", label="Short", duration=120, created_at=datetime.now(), transcript=None
+        )
+        mock_services["local_repo"].get_path.return_value = "/path/to/short.mp3"
+
+        result = ctrl.transcribe_recording("short", engine="whisper")
+
+        assert result["ok"] is True
+        assert result["transcription_status"] == "very_short"
+
     def test_list_untranscribed_recordings_detects_local_missing_transcripts(self, mock_services):
         ctrl = mock_services["controller"]
         missing = DBRecording(
@@ -220,7 +290,7 @@ class TestDashboardControllerTranscribeRecording:
         ctrl = mock_services["controller"]
         mock_services["local_repo"].exists.return_value = True
         mock_services["sqlite_db"].get_recording_by_name.return_value = DBRecording(
-            id=1, name="test", label="Test", duration=10, created_at=datetime.now(), transcript=None
+            id=1, name="test", label="Test", duration=60, created_at=datetime.now(), transcript=None
         )
         mock_services["local_repo"].get_path.return_value = "/path/to/test.hda"
         mock_services["transcription_service"].transcribe.return_value = "new transcript"
@@ -256,7 +326,7 @@ class TestDashboardControllerTranscribeRecording:
 
         assert result["ok"] is False
         assert result["counts"]["failed"] == 1
-        assert result["results"][0]["status"] == "failed"
+        assert result["results"][0]["status"] == "retryable_failure"
 
 
 class TestDashboardControllerSummary:

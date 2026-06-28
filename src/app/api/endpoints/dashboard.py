@@ -1,7 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from app import depends
 from controllers.DashboardController import DashboardController, MIME_TYPES
@@ -198,6 +198,25 @@ async def transcribe_untranscribed_recordings(
     dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
 ):
     return dashboard_controller.transcribe_untranscribed_recordings(engine=body.engine)
+
+
+@router.post("/transcription/no-speech/skip")
+async def mark_no_speech_as_skipped(
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    return dashboard_controller.mark_no_speech_as_skipped()
+
+
+@router.get("/transcription/failure-report.csv")
+async def export_transcription_failure_report(
+    dashboard_controller: DashboardController = Depends(depends.get_dashboard_controller),
+):
+    csv_body = dashboard_controller.export_transcription_failure_report_csv()
+    return Response(
+        content=csv_body,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=agendino-transcription-failure-report.csv"},
+    )
 
 
 @router.post("/transcribe/{name}")

@@ -41,9 +41,12 @@ const SEMANTIC_SEARCH_URL = "/api/dashboard/semantic-search";
 const ASK_RECORDINGS_URL = "/api/dashboard/ask";
 const QUEUE_TRANSCRIBE_NEWEST_URL = "/api/processing-queue/enqueue/transcribe-newest";
 const QUEUE_TRANSCRIBE_COLLECTION_URL = "/api/processing-queue/enqueue/transcribe-collection";
+const QUEUE_TRANSCRIBE_RETRYABLE_URL = "/api/processing-queue/enqueue/transcribe-retryable";
+const QUEUE_TRANSCRIBE_PENDING_URL = "/api/processing-queue/enqueue/transcribe-pending";
 const QUEUE_SUMMARIZE_NEWEST_URL = "/api/processing-queue/enqueue/summarize-newest";
 const QUEUE_SUMMARIZE_COLLECTION_URL = "/api/processing-queue/enqueue/summarize-collection";
 const QUEUE_SUMMARIZE_MISSING_URL = "/api/processing-queue/enqueue/summarize-missing";
+const MARK_NO_SPEECH_SKIPPED_URL = "/api/dashboard/transcription/no-speech/skip";
 
 const show = (el) => el?.classList.remove("d-none");
 const hide = (el) => el?.classList.add("d-none");
@@ -66,7 +69,7 @@ let _allFolders = [];        // all folder paths from last fetch
 let _allCollections = [];    // all collections from last fetch
 let _allSavedViews = [];     // all saved views from last fetch
 let _currentSavedView = null;
-let _recordingFilters = { query: "", date: "" };
+let _recordingFilters = { query: "", date: "", status: "" };
 let _semanticResultNames = null;
 let _semanticResultRank = null;
 let _semanticSearchQuery = "";
@@ -109,6 +112,24 @@ function renderEmbeddingStatus(status, error) {
     }
     return `<span class="badge bg-secondary-subtle text-secondary-emphasis" title="Not indexed for semantic search">
         <i class="bi bi-dash-circle me-1"></i>Not indexed
+    </span>`;
+}
+
+function renderTranscriptionStatus(rec) {
+    const status = rec.transcription_status || (rec.has_transcript ? "transcribed" : "pending");
+    const labels = {
+        transcribed: ["Transcribed", "bg-success-subtle text-success-emphasis", "bi-check-circle"],
+        no_speech_detected: ["No speech", "bg-secondary-subtle text-secondary-emphasis", "bi-volume-mute"],
+        corrupt_audio: ["Corrupt", "bg-danger-subtle text-danger-emphasis", "bi-exclamation-octagon"],
+        retryable_failure: ["Retryable", "bg-warning-subtle text-warning-emphasis", "bi-arrow-clockwise"],
+        pending: ["Pending", "bg-light text-dark", "bi-hourglass"],
+        very_short: ["Very short", "bg-info-subtle text-info-emphasis", "bi-stopwatch"],
+        unknown: ["Unknown", "bg-secondary-subtle text-secondary-emphasis", "bi-question-circle"],
+    };
+    const [label, classes, icon] = labels[status] || labels.unknown;
+    const message = rec.transcription_error || rec.transcription_message || label;
+    return `<span class="badge ${classes}" title="${escapeHtml(message)}">
+        <i class="bi ${icon} me-1"></i>${label}
     </span>`;
 }
 
@@ -289,7 +310,7 @@ function renderMobileRecordingCard(rec) {
             <span><i class="bi bi-clock me-1"></i>${escapeHtml(formatDuration(rec.duration))}</span>
         </div>
         <div class="recording-card-statuses">
-            <div><span class="recording-card-status-label">Transcript</span>${statusText(rec.has_transcript)}</div>
+            <div><span class="recording-card-status-label">Transcript</span>${renderTranscriptionStatus(rec)}</div>
             <div><span class="recording-card-status-label">Summary</span>${statusText(rec.has_summary)}</div>
             <div><span class="recording-card-status-label">Index</span>${renderEmbeddingStatus(rec.embedding_status, rec.embedding_error)}</div>
         </div>
@@ -347,6 +368,7 @@ function renderRow(rec) {
         <td class="fw-semibold">${rec.name}</td>
         <td>${dateCell}</td>
         <td>${formatDuration(rec.duration)}</td>
+        <td class="text-center">${renderTranscriptionStatus(rec)}</td>
         <td>${formatSize(rec.size)}</td>
         <td class="text-center">${fileTypeBadge(rec.file_extension)}</td>
         <td class="text-center">${statusBadge(rec.on_device)}</td>
@@ -443,6 +465,14 @@ function mergeDeviceData(serverData, deviceData) {
                 embedding_model: null,
                 embedding_error: null,
                 embedding_indexed_at: null,
+                transcription_status: "pending",
+                transcription_error: null,
+                transcription_attempted_at: null,
+                transcription_segment_count: null,
+                transcription_language: null,
+                transcription_language_probability: null,
+                transcription_skipped: false,
+                transcription_message: "This recording has not been transcribed yet.",
             });
         }
     }
@@ -697,6 +727,7 @@ function filterRecordingsByCollection(recordings, collectionId) {
 function filterRecordingsBySearch(recordings) {
     const query = (_recordingFilters.query || "").trim().toLowerCase();
     const date = _recordingFilters.date || "";
+    const statusFilter = _recordingFilters.status || "";
     return recordings.filter(rec => {
         if (query) {
             const title = (rec.db_title || rec.db_label || rec.name || "").toLowerCase();
@@ -704,6 +735,15 @@ function filterRecordingsBySearch(recordings) {
             if (!title.includes(query) && !tags.includes(query)) return false;
         }
         if (date && rec.date !== date) return false;
+        if (statusFilter === "transcribed" && !rec.has_transcript) return false;
+        if (statusFilter === "untranscribed" && rec.has_transcript) return false;
+        if (statusFilter === "missing_summary" && (!rec.has_transcript || rec.has_summary)) return false;
+        if (statusFilter === "missing_embedding" && rec.embedding_status === "indexed") return false;
+        if (
+            statusFilter &&
+            !["transcribed", "untranscribed", "missing_summary", "missing_embedding"].includes(statusFilter) &&
+            rec.transcription_status !== statusFilter
+        ) return false;
         return true;
     });
 }
@@ -732,6 +772,7 @@ function applySavedView(view) {
     _recordingFilters = {
         query: view.search_query || "",
         date: view.date_filter || "",
+        status: "",
     };
     _currentCollection = view.collection_id === null || view.collection_id === undefined
         ? null
@@ -741,8 +782,10 @@ function applySavedView(view) {
 
     const recordingSearchInput = $("#recording-search-input");
     const recordingDateFilter = $("#recording-date-filter");
+    const recordingStatusFilter = $("#recording-status-filter");
     if (recordingSearchInput) recordingSearchInput.value = _recordingFilters.query;
     if (recordingDateFilter) recordingDateFilter.value = _recordingFilters.date;
+    if (recordingStatusFilter) recordingStatusFilter.value = "";
 
     renderFolderTree(_allFolders, _allRecordings);
     renderCollectionTree(_allCollections, _allRecordings);
@@ -754,14 +797,21 @@ function updateFilterCount(total, filtered) {
     const el = $("#recording-filter-count");
     if (!el) return;
     const hasFilters = Boolean(
-        _recordingFilters.query || _recordingFilters.date || _currentCollection !== null || _semanticResultNames !== null
+        _recordingFilters.query ||
+        _recordingFilters.date ||
+        _recordingFilters.status ||
+        _currentCollection !== null ||
+        _semanticResultNames !== null
     );
     const transcribed = _allRecordings.filter(rec => rec.has_transcript).length;
-    const untranscribed = _allRecordings.filter(rec => rec.in_db && rec.on_local && !rec.has_transcript).length;
+    const pending = _allRecordings.filter(rec => rec.transcription_status === "pending").length;
+    const retryable = _allRecordings.filter(rec => rec.transcription_status === "retryable_failure").length;
+    const corrupt = _allRecordings.filter(rec => rec.transcription_status === "corrupt_audio").length;
+    const noSpeech = _allRecordings.filter(rec => rec.transcription_status === "no_speech_detected").length;
     const summarized = _allRecordings.filter(rec => rec.has_summary).length;
     const missingSummaries = _allRecordings.filter(rec => rec.has_transcript && !rec.has_summary).length;
     const filterText = hasFilters ? `${filtered} of ${total} shown` : `${_allRecordings.length} total`;
-    el.textContent = `${filterText} · ${transcribed} transcribed · ${untranscribed} untranscribed · ${summarized} summarized · ${missingSummaries} missing summaries`;
+    el.textContent = `${filterText} · ${transcribed} transcribed · ${pending} pending · ${retryable} retryable · ${corrupt} corrupt · ${noSpeech} no speech · ${summarized} summarized · ${missingSummaries} missing summaries`;
 }
 
 function updateBulkActionsBar() {
@@ -857,6 +907,14 @@ async function loadDashboard() {
         $("#count-device").textContent = data.counts.device;
         $("#count-local").textContent = data.counts.local;
         $("#count-db").textContent = data.counts.db;
+        $("#health-total").textContent = data.counts.total_recordings || 0;
+        $("#health-transcribed").textContent = data.counts.transcribed || 0;
+        $("#health-pending").textContent = data.counts.pending_transcription || 0;
+        $("#health-retryable").textContent = data.counts.retryable_failures || 0;
+        $("#health-no-speech").textContent = data.counts.no_speech_detected || 0;
+        $("#health-corrupt").textContent = data.counts.corrupt_audio || 0;
+        $("#health-very-short").textContent = data.counts.very_short || 0;
+        $("#health-missing-summary").textContent = data.counts.missing_summaries || 0;
 
         if (data.device.connected) {
             $("#device-status").textContent = "Connected";
@@ -924,6 +982,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const recordingSearchInput = $("#recording-search-input");
     const recordingDateFilter = $("#recording-date-filter");
+    const recordingStatusFilter = $("#recording-status-filter");
     const recordingFilterClear = $("#recording-filter-clear");
     const semanticSearchInput = $("#semantic-search-input");
     const semanticSearchBtn = $("#semantic-search-btn");
@@ -938,6 +997,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const queueTranscribe25Btn = $("#btn-queue-transcribe-25");
     const queueTranscribe50Btn = $("#btn-queue-transcribe-50");
     const queueTranscribeCollectionBtn = $("#btn-queue-transcribe-collection");
+    const queueRetryFailedBtn = $("#btn-queue-retry-failed");
+    const queueRetryPendingBtn = $("#btn-queue-retry-pending");
+    const markNoSpeechSkippedBtn = $("#btn-mark-no-speech-skipped");
     const queueSummarize25Btn = $("#btn-queue-summarize-25");
     const queueSummarize50Btn = $("#btn-queue-summarize-50");
     const queueSummarizeCollectionBtn = $("#btn-queue-summarize-collection");
@@ -1152,7 +1214,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await res.json();
             const counts = data.counts || {};
             const failed = counts.failed || 0;
-            const message = `Transcribed ${counts.transcribed || 0}; skipped ${counts.skipped_existing || 0}; failed ${failed}.`;
+            const message = `Transcribed ${counts.transcribed || 0}; very short ${counts.very_short || 0}; no speech ${counts.no_speech_detected || 0}; corrupt ${counts.corrupt_audio || 0}; retryable ${counts.retryable_failure || 0}; skipped ${counts.skipped_existing || 0}; failed ${failed}.`;
 
             if (!res.ok || !data.ok) {
                 const detail = data.error || message || "Bulk transcription failed.";
@@ -1492,6 +1554,51 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         });
     }
+    if (queueRetryFailedBtn) {
+        queueRetryFailedBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            enqueueProcessingJob({
+                url: QUEUE_TRANSCRIBE_RETRYABLE_URL,
+                payload: { engine: "whisper" },
+                triggerBtn: queueRetryFailedBtn,
+                label: "retryable transcription failures",
+            });
+        });
+    }
+    if (queueRetryPendingBtn) {
+        queueRetryPendingBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            enqueueProcessingJob({
+                url: QUEUE_TRANSCRIBE_PENDING_URL,
+                payload: { engine: "whisper" },
+                triggerBtn: queueRetryPendingBtn,
+                label: "never-attempted recordings",
+            });
+        });
+    }
+    if (markNoSpeechSkippedBtn) {
+        markNoSpeechSkippedBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            if (!window.confirm("Mark all no-speech recordings as skipped? This will not delete audio or transcripts.")) {
+                return;
+            }
+            markNoSpeechSkippedBtn.disabled = true;
+            showDashboardAlert("alert-info", '<span class="spinner-border spinner-border-sm me-1"></span>Marking no-speech recordings…');
+            try {
+                const res = await fetch(MARK_NO_SPEECH_SKIPPED_URL, { method: "POST" });
+                const data = await res.json();
+                if (!res.ok || !data.ok) {
+                    throw new Error(data.detail || data.error || "Failed to mark no-speech recordings");
+                }
+                showDashboardAlert("alert-success", `<i class="bi bi-check-circle me-1"></i>${escapeHtml(data.message || "No-speech recordings marked as skipped.")}`);
+                await loadDashboard();
+            } catch (err) {
+                showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(err.message)}`);
+            } finally {
+                markNoSpeechSkippedBtn.disabled = false;
+            }
+        });
+    }
     if (queueSummarize25Btn) {
         queueSummarize25Btn.addEventListener("click", (e) => {
             e.preventDefault();
@@ -1579,15 +1686,23 @@ document.addEventListener("DOMContentLoaded", () => {
             renderFilteredTable();
         });
     }
+    if (recordingStatusFilter) {
+        recordingStatusFilter.addEventListener("change", () => {
+            markSavedViewDirty();
+            _recordingFilters.status = recordingStatusFilter.value;
+            renderFilteredTable();
+        });
+    }
     if (recordingFilterClear) {
         recordingFilterClear.addEventListener("click", (e) => {
             e.preventDefault();
             markSavedViewDirty();
-            _recordingFilters = { query: "", date: "" };
+            _recordingFilters = { query: "", date: "", status: "" };
             _currentCollection = null;
             clearSemanticSearch();
             if (recordingSearchInput) recordingSearchInput.value = "";
             if (recordingDateFilter) recordingDateFilter.value = "";
+            if (recordingStatusFilter) recordingStatusFilter.value = "";
             renderCollectionTree(_allCollections, _allRecordings);
             renderFilteredTable();
         });
@@ -2906,6 +3021,7 @@ document.addEventListener("DOMContentLoaded", () => {
          hide(transcriptAudioPlayer);
          transcriptEditToggle.innerHTML = '<i class="bi bi-pencil-square"></i> Edit';
          transcriptEditToggle.disabled = true;
+         modalError.className = "alert alert-danger m-3 d-none";
          hide(modalError);
          show(modalBackdrop);
      }
@@ -2987,9 +3103,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
             hide(modalLoading);
             if (data.ok) {
-                showTranscriptPreview(data.transcript);
+                if (data.transcript && data.transcript.trim()) {
+                    showTranscriptPreview(data.transcript);
+                } else {
+                    modalError.className = "alert alert-info m-3";
+                    modalError.textContent = data.transcription_message || "Whisper completed but detected no speech segments.";
+                    show(modalError);
+                }
                 await loadDashboard();
             } else {
+                modalError.className = "alert alert-danger m-3";
                 modalError.textContent = data.error;
                 show(modalError);
             }
@@ -3044,11 +3167,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (data.ok) {
                     showTranscriptPreview(data.transcript);
                 } else {
+                    modalError.className = "alert alert-warning m-3";
                     modalError.textContent = data.error;
                     show(modalError);
                 }
             } catch (err) {
                 hide(modalLoading);
+                modalError.className = "alert alert-danger m-3";
                 modalError.textContent = `Failed to load transcript: ${err.message}`;
                 show(modalError);
             }
