@@ -278,6 +278,10 @@ class DashboardController:
             "folders": folders,
             "collections": collections,
             "saved_views": saved_views,
+            "summary_pipeline": self._sqlite_db_repository.get_summary_pipeline_status(
+                provider="local",
+                model=self._default_ollama_summary_model,
+            ),
         }
 
     def upload_recording(self, filename: str, file_data: bytes, label: str = "") -> dict:

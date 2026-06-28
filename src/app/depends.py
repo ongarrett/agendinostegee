@@ -50,7 +50,7 @@ DEFAULT_CONFIG = {
     "WHISPER_MODEL_SIZE": "small",
     "WHISPER_DEVICE": "cpu",
     "WHISPER_COMPUTE_TYPE": "auto",
-    "SUMMARY_PROVIDER": "gemini",
+    "SUMMARY_PROVIDER": "local",
     "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
     "OLLAMA_SUMMARY_MODEL": "qwen3:8b",
     "AUTH_ENABLED": "false",

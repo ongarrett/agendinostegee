@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Summary Pipeline{% endblock %}
+{% block page_header %}Summary Pipeline{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="/static/processing_queue.css">
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+                <div>
+                    <h5 class="mb-0">Durable Summary Pipeline</h5>
+                    <div class="text-muted small">Local AI / Ollama is the default. Gemini runs only when selected.</div>
+                </div>
+                <div class="ms-auto d-flex flex-wrap gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" id="summary-pipeline-refresh">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                    </button>
+                    <button class="btn btn-sm btn-outline-warning" id="summary-pipeline-pause">
+                        <i class="bi bi-pause-fill me-1"></i>Pause
+                    </button>
+                    <button class="btn btn-sm btn-primary" id="summary-pipeline-resume">
+                        <i class="bi bi-play-fill me-1"></i>Resume
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="summary-pipeline-alert" class="alert d-none" role="alert"></div>
+
+                <div class="queue-counts">
+                    <div class="queue-count-card">
+                        <span class="label">Missing</span>
+                        <strong id="summary-pipeline-missing">0</strong>
+                    </div>
+                    <div class="queue-count-card">
+                        <span class="label">Ready</span>
+                        <strong id="summary-pipeline-ready">0</strong>
+                    </div>
+                    <div class="queue-count-card">
+                        <span class="label">Queued</span>
+                        <strong id="summary-pipeline-queued">0</strong>
+                    </div>
+                    <div class="queue-count-card">
+                        <span class="label">Running</span>
+                        <strong id="summary-pipeline-running">0</strong>
+                    </div>
+                    <div class="queue-count-card">
+                        <span class="label">Completed</span>
+                        <strong id="summary-pipeline-completed">0</strong>
+                    </div>
+                    <div class="queue-count-card">
+                        <span class="label">Failed</span>
+                        <strong id="summary-pipeline-failed">0</strong>
+                    </div>
+                </div>
+
+                <div class="row g-3 mt-1">
+                    <div class="col-lg-4">
+                        <label class="form-label small fw-semibold" for="summary-pipeline-prompt">Prompt</label>
+                        <select class="form-select form-select-sm" id="summary-pipeline-prompt"></select>
+                    </div>
+                    <div class="col-lg-3">
+                        <label class="form-label small fw-semibold" for="summary-pipeline-provider">Provider</label>
+                        <select class="form-select form-select-sm" id="summary-pipeline-provider">
+                            <option value="local" selected>Local AI / Ollama</option>
+                            <option value="gemini">Gemini</option>
+                        </select>
+                    </div>
+                    <div class="col-lg-3" id="summary-pipeline-model-wrap">
+                        <label class="form-label small fw-semibold" for="summary-pipeline-model">Local model</label>
+                        <select class="form-select form-select-sm" id="summary-pipeline-model">
+                            <option value="qwen3:8b" selected>qwen3:8b</option>
+                            <option value="llama3.1:8b">llama3.1:8b</option>
+                        </select>
+                    </div>
+                    <div class="col-lg-2">
+                        <label class="form-label small fw-semibold">State</label>
+                        <div><span class="badge bg-secondary-subtle text-secondary-emphasis" id="summary-pipeline-state">Loading</span></div>
+                    </div>
+                </div>
+
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    <button class="btn btn-sm btn-outline-primary" data-summary-enqueue-limit="25">
+                        Summarize next 25
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" data-summary-enqueue-limit="50">
+                        Summarize next 50
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" data-summary-enqueue-limit="">
+                        Summarize all missing
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" id="summary-pipeline-retry-failed">
+                        Retry failed
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="summary-pipeline-clear-completed">
+                        Clear completed jobs
+                    </button>
+                </div>
+
+                <div class="row g-3 mt-2">
+                    <div class="col-md-4">
+                        <div class="small text-muted">Provider / model</div>
+                        <div id="summary-pipeline-provider-label">Local AI / Ollama / qwen3:8b</div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="small text-muted">Current recording</div>
+                        <div id="summary-pipeline-current">None running</div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="small text-muted">ETA</div>
+                        <div id="summary-pipeline-eta">Unknown</div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="small text-muted">Last updated</div>
+                        <div id="summary-pipeline-updated">Never</div>
+                    </div>
+                </div>
+
+                <div id="summary-pipeline-loading" class="text-center p-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading…</span>
+                    </div>
+                </div>
+                <div id="summary-pipeline-empty" class="text-center text-muted p-4 d-none">
+                    <i class="bi bi-inbox" style="font-size: 2.5rem;"></i>
+                    <p class="mt-2 mb-0">No summary jobs yet.</p>
+                </div>
+                <div class="table-responsive mt-3">
+                    <table class="table table-hover align-middle d-none" id="summary-pipeline-table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Recording</th>
+                                <th>Provider / Prompt</th>
+                                <th>Attempts</th>
+                                <th>Updated</th>
+                                <th>Error</th>
+                            </tr>
+                        </thead>
+                        <tbody id="summary-pipeline-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="/static/summary_pipeline.js"></script>
+{% endblock %}

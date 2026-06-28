@@ -130,6 +130,13 @@ CREATE INDEX IF NOT EXISTS idx_action_center_item_status ON action_center_item (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_action_center_item_unique_source
     ON action_center_item (recording_id, item_type, text, source_hash);
 
+CREATE TABLE IF NOT EXISTS app_state
+(
+    key        TEXT PRIMARY KEY,
+    value      TEXT    NOT NULL,
+    updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS processing_queue
 (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -38,6 +38,7 @@ class SqliteDBRepository:
         self._ensure_saved_view_tables()
         self._ensure_embedding_tables()
         self._ensure_action_center_tables()
+        self._ensure_app_state_table()
         self._ensure_processing_queue_tables()
         self.backfill_transcription_statuses()
 
@@ -244,6 +245,22 @@ class SqliteDBRepository:
             self._ensure_column(conn, "processing_queue", "summary_provider", "TEXT DEFAULT NULL")
             self._ensure_column(conn, "processing_queue", "summary_model", "TEXT DEFAULT NULL")
             self._migrate_processing_queue_summary_models(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _ensure_app_state_table(self) -> None:
+        """Migration: add small key/value state table for durable local workflow flags."""
+        conn = self._connect()
+        try:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS app_state
+                (
+                    key        TEXT PRIMARY KEY,
+                    value      TEXT    NOT NULL,
+                    updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
+                );
+            """)
             conn.commit()
         finally:
             conn.close()
@@ -2628,14 +2645,45 @@ class SqliteDBRepository:
             "completed_at": row["completed_at"],
         }
 
-    def list_processing_queue_jobs(self, status: str = "") -> list[dict]:
+    def get_app_state(self, key: str, default: str | None = None) -> str | None:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+            return row["value"] if row else default
+        finally:
+            conn.close()
+
+    def set_app_state(self, key: str, value: str) -> dict:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO app_state (key, value, updated_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = datetime('now')
+                """,
+                (key, value),
+            )
+            conn.commit()
+            row = conn.execute("SELECT key, value, updated_at FROM app_state WHERE key = ?", (key,)).fetchone()
+            return {"key": row["key"], "value": row["value"], "updated_at": row["updated_at"]}
+        finally:
+            conn.close()
+
+    def list_processing_queue_jobs(self, status: str = "", job_type: str = "") -> list[dict]:
         conn = self._connect()
         try:
             params: list[str] = []
-            where = ""
+            where_parts = []
             if status:
-                where = "WHERE pq.status = ?"
+                where_parts.append("pq.status = ?")
                 params.append(status)
+            if job_type:
+                where_parts.append("pq.job_type = ?")
+                params.append(job_type)
+            where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
             rows = conn.execute(
                 f"""
                 SELECT pq.*
@@ -2657,15 +2705,24 @@ class SqliteDBRepository:
         finally:
             conn.close()
 
-    def get_processing_queue_counts(self) -> dict:
+    def get_processing_queue_counts(self, job_type: str = "") -> dict:
         conn = self._connect()
         try:
-            rows = conn.execute("""
+            params = []
+            where = ""
+            if job_type:
+                where = "WHERE job_type = ?"
+                params.append(job_type)
+            rows = conn.execute(
+                f"""
                 SELECT status, COUNT(*) AS count
                 FROM processing_queue
+                {where}
                 GROUP BY status
-            """).fetchall()
-            counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0}
+            """,
+                params,
+            ).fetchall()
+            counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0, "skipped": 0}
             for row in rows:
                 counts[row["status"]] = int(row["count"])
             counts["total"] = sum(counts.values())
@@ -2681,6 +2738,7 @@ class SqliteDBRepository:
         summary_provider: str | None = None,
         summary_model: str | None = None,
         prompt_id: str | None = None,
+        skip_statuses: tuple[str, ...] = ("pending", "running"),
     ) -> dict:
         conn = self._connect()
         try:
@@ -2718,8 +2776,9 @@ class SqliteDBRepository:
                     failed.append({"name": clean_name, "error": "Recording not found"})
                     continue
 
+                placeholders = ",".join(["?"] * len(skip_statuses))
                 active = conn.execute(
-                    """
+                    f"""
                     SELECT id, status
                     FROM processing_queue
                     WHERE job_type = ?
@@ -2728,10 +2787,18 @@ class SqliteDBRepository:
                       AND COALESCE(summary_provider, '') = COALESCE(?, '')
                       AND COALESCE(summary_model, '') = COALESCE(?, '')
                       AND COALESCE(prompt_id, '') = COALESCE(?, '')
-                      AND status IN ('pending', 'running')
+                      AND status IN ({placeholders})
                     LIMIT 1
                     """,
-                    (job_type, rec["id"], engine, summary_provider, summary_model, prompt_id),
+                    (
+                        job_type,
+                        rec["id"],
+                        engine,
+                        summary_provider,
+                        summary_model,
+                        prompt_id,
+                        *skip_statuses,
+                    ),
                 ).fetchone()
                 if active:
                     skipped.append({"name": clean_name, "status": active["status"], "job_id": active["id"]})
@@ -2780,16 +2847,26 @@ class SqliteDBRepository:
         finally:
             conn.close()
 
-    def claim_next_processing_queue_job(self) -> dict | None:
+    def claim_next_processing_queue_job(self, exclude_job_types: list[str] | None = None) -> dict | None:
         conn = self._connect()
         try:
-            row = conn.execute("""
+            params = []
+            excluded_sql = ""
+            if exclude_job_types:
+                placeholders = ",".join(["?"] * len(exclude_job_types))
+                excluded_sql = f"AND job_type NOT IN ({placeholders})"
+                params.extend(exclude_job_types)
+            row = conn.execute(
+                f"""
                 SELECT *
                 FROM processing_queue
                 WHERE status = 'pending'
+                  {excluded_sql}
                 ORDER BY created_at ASC, id ASC
                 LIMIT 1
-                """).fetchone()
+                """,
+                params,
+            ).fetchone()
             if not row:
                 return None
             conn.execute(
@@ -2813,7 +2890,7 @@ class SqliteDBRepository:
     def update_processing_queue_job_status(self, job_id: int, status: str, error: str | None = None) -> dict | None:
         conn = self._connect()
         try:
-            completed_expr = "datetime('now')" if status in ("completed", "failed") else "completed_at"
+            completed_expr = "datetime('now')" if status in ("completed", "failed", "skipped") else "completed_at"
             conn.execute(
                 f"""
                 UPDATE processing_queue
@@ -2849,17 +2926,102 @@ class SqliteDBRepository:
         finally:
             conn.close()
 
-    def reset_running_processing_jobs(self) -> int:
+    def reset_running_processing_jobs(self, job_type: str | None = None) -> int:
         conn = self._connect()
         try:
-            result = conn.execute("""
+            params = []
+            job_type_filter = ""
+            if job_type:
+                job_type_filter = "AND job_type = ?"
+                params.append(job_type)
+            result = conn.execute(
+                f"""
                 UPDATE processing_queue
                 SET status = 'pending',
                     updated_at = datetime('now')
                 WHERE status = 'running'
-                """)
+                  {job_type_filter}
+                """,
+                params,
+            )
             conn.commit()
             return result.rowcount
+        finally:
+            conn.close()
+
+    def retry_failed_processing_jobs(self, job_type: str) -> dict:
+        conn = self._connect()
+        try:
+            if job_type == "summarize":
+                skipped = conn.execute("""
+                    UPDATE processing_queue
+                    SET status = 'skipped',
+                        error = 'Summary already exists',
+                        completed_at = datetime('now'),
+                        updated_at = datetime('now')
+                    WHERE job_type = 'summarize'
+                      AND status = 'failed'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM summary s
+                          WHERE s.recording_id = processing_queue.recording_id
+                      )
+                    """)
+                result = conn.execute("""
+                    UPDATE processing_queue
+                    SET status = 'pending',
+                        error = NULL,
+                        started_at = NULL,
+                        completed_at = NULL,
+                        updated_at = datetime('now')
+                    WHERE job_type = 'summarize'
+                      AND status = 'failed'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM summary s
+                          WHERE s.recording_id = processing_queue.recording_id
+                      )
+                    """)
+            else:
+                skipped = None
+                result = conn.execute(
+                    """
+                    UPDATE processing_queue
+                    SET status = 'pending',
+                        error = NULL,
+                        started_at = NULL,
+                        completed_at = NULL,
+                        updated_at = datetime('now')
+                    WHERE job_type = ?
+                      AND status = 'failed'
+                    """,
+                    (job_type,),
+                )
+            conn.commit()
+            return {
+                "ok": True,
+                "retried": result.rowcount,
+                "skipped": skipped.rowcount if skipped else 0,
+            }
+        finally:
+            conn.close()
+
+    def clear_processing_jobs(self, job_type: str, statuses: tuple[str, ...]) -> dict:
+        if not statuses:
+            return {"ok": True, "cleared": 0}
+        conn = self._connect()
+        try:
+            placeholders = ",".join(["?"] * len(statuses))
+            result = conn.execute(
+                f"""
+                DELETE FROM processing_queue
+                WHERE job_type = ?
+                  AND status IN ({placeholders})
+                """,
+                (job_type, *statuses),
+            )
+            conn.commit()
+            return {"ok": True, "cleared": result.rowcount}
         finally:
             conn.close()
 
@@ -2964,5 +3126,90 @@ class SqliteDBRepository:
                 params,
             ).fetchall()
             return [row["name"] for row in rows]
+        finally:
+            conn.close()
+
+    def get_summary_pipeline_status(self, provider: str = "local", model: str | None = "qwen3:8b") -> dict:
+        conn = self._connect()
+        try:
+            total_missing = conn.execute("""
+                SELECT COUNT(*) AS count
+                FROM recording r
+                WHERE r.transcript IS NOT NULL
+                  AND trim(r.transcript) != ''
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM summary s
+                      WHERE s.recording_id = r.id
+                  )
+                """).fetchone()["count"]
+            ready = conn.execute("""
+                SELECT COUNT(*) AS count
+                FROM recording r
+                WHERE r.transcript IS NOT NULL
+                  AND trim(r.transcript) != ''
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM summary s
+                      WHERE s.recording_id = r.id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM processing_queue pq
+                      WHERE pq.job_type = 'summarize'
+                        AND pq.recording_id = r.id
+                        AND pq.status IN ('pending', 'running', 'completed')
+                  )
+                """).fetchone()["count"]
+            queue_rows = conn.execute("""
+                SELECT status, COUNT(*) AS count
+                FROM processing_queue
+                WHERE job_type = 'summarize'
+                GROUP BY status
+                """).fetchall()
+            queue_counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0, "skipped": 0}
+            for row in queue_rows:
+                queue_counts[row["status"]] = int(row["count"])
+            current = conn.execute("""
+                SELECT *
+                FROM processing_queue
+                WHERE job_type = 'summarize'
+                  AND status = 'running'
+                ORDER BY started_at ASC, id ASC
+                LIMIT 1
+                """).fetchone()
+            last_updated = conn.execute("""
+                SELECT MAX(updated_at) AS last_updated
+                FROM processing_queue
+                WHERE job_type = 'summarize'
+                """).fetchone()["last_updated"]
+            avg_seconds = conn.execute("""
+                SELECT AVG((julianday(completed_at) - julianday(started_at)) * 86400.0) AS avg_seconds
+                FROM processing_queue
+                WHERE job_type = 'summarize'
+                  AND status = 'completed'
+                  AND started_at IS NOT NULL
+                  AND completed_at IS NOT NULL
+                """).fetchone()["avg_seconds"]
+            eta_seconds = None
+            if avg_seconds and queue_counts["pending"]:
+                eta_seconds = int(float(avg_seconds) * queue_counts["pending"])
+
+            return {
+                "ok": True,
+                "paused": self.get_app_state("summary_pipeline_paused", "false") == "true",
+                "provider": provider,
+                "model": model,
+                "total_missing": int(total_missing),
+                "ready": int(ready),
+                "counts": {
+                    **queue_counts,
+                    "queued": queue_counts["pending"],
+                    "total": sum(queue_counts.values()),
+                },
+                "current_job": self._processing_job_from_row(current) if current else None,
+                "estimated_seconds_remaining": eta_seconds,
+                "last_updated": last_updated,
+            }
         finally:
             conn.close()

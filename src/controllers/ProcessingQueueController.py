@@ -13,3 +13,10 @@ class ProcessingQueueController:
             name="dashboard/processing_queue.html",
             context={"active_page": "processing_queue", "auth_enabled": self._auth_enabled},
         )
+
+    def summary_pipeline_home(self, request: Request):
+        return self._templates.TemplateResponse(
+            request=request,
+            name="dashboard/summary_pipeline.html",
+            context={"active_page": "summary_pipeline", "auth_enabled": self._auth_enabled},
+        )

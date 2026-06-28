@@ -44,3 +44,11 @@ def processing_queue_home(
     processing_queue_controller: ProcessingQueueController = Depends(depends.get_processing_queue_controller),
 ):
     return processing_queue_controller.processing_queue_home(request)
+
+
+@router.get("/summary-pipeline", response_class=HTMLResponse)
+def summary_pipeline_home(
+    request: Request,
+    processing_queue_controller: ProcessingQueueController = Depends(depends.get_processing_queue_controller),
+):
+    return processing_queue_controller.summary_pipeline_home(request)
