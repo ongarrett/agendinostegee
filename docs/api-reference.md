@@ -34,6 +34,20 @@ Full list of REST endpoints. Interactive Swagger UI is available at `http://127.
 | `PATCH` | `/api/dashboard/recordings/move` | Bulk move recordings |
 | `POST` | `/api/dashboard/recordings/collections` | Bulk add recordings to a collection |
 
+## Processing Queue - `/api/processing-queue`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/processing-queue/jobs` | List processing queue jobs |
+| `POST` | `/api/processing-queue/process-next` | Process the next queued jobs |
+| `POST` | `/api/processing-queue/resume` | Reset running jobs and resume processing |
+| `GET` | `/api/processing-queue/summary-pipeline` | Get durable summary pipeline status |
+| `POST` | `/api/processing-queue/summary-pipeline/enqueue` | Queue missing summary jobs |
+| `POST` | `/api/processing-queue/summary-pipeline/pause` | Pause summary job processing |
+| `POST` | `/api/processing-queue/summary-pipeline/resume` | Resume and process summary jobs |
+| `POST` | `/api/processing-queue/summary-pipeline/retry-failed` | Requeue failed summary jobs |
+| `POST` | `/api/processing-queue/summary-pipeline/clear-completed` | Clear completed/skipped summary jobs |
+
 ## Calendar - `/api/calendar`
 
 | Method | Endpoint | Description |

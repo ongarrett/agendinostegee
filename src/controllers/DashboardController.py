@@ -48,7 +48,7 @@ class DashboardController:
         publish_services: dict[str, object] | None = None,
         whisper_transcription_service: WhisperTranscriptionService | None = None,
         ollama_summarization_service: OllamaSummarizationService | None = None,
-        default_summary_provider: str = "gemini",
+        default_summary_provider: str = "local",
         default_ollama_summary_model: str = "qwen3:8b",
         auth_enabled: bool = False,
     ):

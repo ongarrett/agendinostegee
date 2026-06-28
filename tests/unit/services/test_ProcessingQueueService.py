@@ -13,6 +13,7 @@ class FakeDashboardController:
         self.summarized = []
         self.fail_transcribe = set()
         self.fail_summarize = set()
+        self.summarize_errors = {}
 
     def transcribe_recording(self, name, engine="whisper"):
         self.transcribed.append({"name": name, "engine": engine})
@@ -30,7 +31,7 @@ class FakeDashboardController:
             }
         )
         if name in self.fail_summarize:
-            return {"ok": False, "error": "Summarization failed"}
+            return {"ok": False, "error": self.summarize_errors.get(name, "Summarization failed")}
         return {"ok": True, "summary_id": 1, "version": 1}
 
 
@@ -320,3 +321,157 @@ def test_resume_resets_running_jobs_before_processing(queue_db):
 
     assert result["counts"]["completed"] == 1
     assert service.list_jobs()["jobs"][0]["status"] == "completed"
+
+
+def test_summary_pipeline_queues_missing_summaries_with_local_default(queue_db):
+    insert_recording(queue_db, "missing", transcript="Transcript")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    result = service.enqueue_summary_pipeline(prompt_id="prompt", limit=25)
+    jobs = service.list_jobs(job_type="summarize")["jobs"]
+
+    assert result["counts"]["enqueued"] == 1
+    assert jobs[0]["summary_provider"] == "local"
+    assert jobs[0]["summary_model"] == "qwen3:8b"
+
+
+def test_summary_pipeline_uses_gemini_only_when_explicitly_selected(queue_db):
+    insert_recording(queue_db, "missing", transcript="Transcript")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    result = service.enqueue_summary_pipeline(
+        prompt_id="prompt",
+        limit=25,
+        summary_provider="gemini",
+        summary_model="qwen3:8b",
+    )
+    jobs = service.list_jobs(job_type="summarize")["jobs"]
+
+    assert result["counts"]["enqueued"] == 1
+    assert jobs[0]["summary_provider"] == "gemini"
+    assert jobs[0]["summary_model"] is None
+
+
+def test_summary_pipeline_does_not_duplicate_completed_jobs(queue_db):
+    insert_recording(queue_db, "missing", transcript="Transcript")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+
+    first = service.enqueue_summary_pipeline(prompt_id="prompt", limit=25)
+    service.process_next(max_jobs=1)
+    second = service.enqueue_summary_pipeline(prompt_id="prompt", limit=25)
+
+    assert first["counts"]["enqueued"] == 1
+    assert second["counts"]["enqueued"] == 0
+    assert second["counts"]["skipped_active"] == 1
+    assert len(service.list_jobs(job_type="summarize")["jobs"]) == 1
+
+
+def test_summary_job_completion_updates_pipeline_status(queue_db):
+    insert_recording(queue_db, "missing", transcript="Transcript")
+    dashboard = FakeDashboardController()
+    service = ProcessingQueueService(queue_db, dashboard)
+    service.enqueue_summary_pipeline(prompt_id="prompt", limit=25)
+
+    result = service.process_next(max_jobs=1)
+    pipeline = service.summary_pipeline_status()
+
+    assert result["counts"]["completed"] == 1
+    assert pipeline["counts"]["completed"] == 1
+    assert dashboard.summarized[0]["summary_provider"] == "local"
+
+
+def test_summary_job_failure_stores_local_ollama_setup_message(queue_db):
+    insert_recording(queue_db, "missing", transcript="Transcript")
+    dashboard = FakeDashboardController()
+    dashboard.fail_summarize.add("missing")
+    dashboard.summarize_errors["missing"] = "urlopen error connection refused"
+    service = ProcessingQueueService(queue_db, dashboard)
+    service.enqueue_summary_pipeline(prompt_id="prompt", limit=25)
+
+    result = service.process_next(max_jobs=1)
+    job = service.list_jobs(job_type="summarize")["jobs"][0]
+
+    assert result["counts"]["failed"] == 1
+    assert "ollama serve" in job["error"]
+    assert "qwen3:8b" in job["error"]
+
+
+def test_retry_failed_summary_jobs_requeues_failed_missing_summaries(queue_db):
+    insert_recording(queue_db, "missing", transcript="Transcript")
+    dashboard = FakeDashboardController()
+    dashboard.fail_summarize.add("missing")
+    service = ProcessingQueueService(queue_db, dashboard)
+    service.enqueue_summary_pipeline(prompt_id="prompt", limit=25)
+    service.process_next(max_jobs=1)
+
+    dashboard.fail_summarize.clear()
+    result = service.retry_failed_summary_jobs()
+    jobs = service.list_jobs(job_type="summarize")["jobs"]
+
+    assert result["retried"] == 1
+    assert jobs[0]["status"] == "pending"
+    assert jobs[0]["error"] is None
+
+
+def test_pending_summary_jobs_resume_after_service_recreation(queue_db):
+    insert_recording(queue_db, "missing", transcript="Transcript")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+    service.enqueue_summary_pipeline(prompt_id="prompt", limit=25)
+
+    resumed_dashboard = FakeDashboardController()
+    resumed_service = ProcessingQueueService(queue_db, resumed_dashboard)
+    result = resumed_service.resume_summary_pipeline(max_jobs=1)
+
+    assert result["counts"]["completed"] == 1
+    assert resumed_dashboard.summarized[0]["name"] == "missing"
+
+
+def test_summary_job_is_skipped_if_summary_exists_before_execution(queue_db):
+    insert_recording(queue_db, "missing", transcript="Transcript")
+    dashboard = FakeDashboardController()
+    service = ProcessingQueueService(queue_db, dashboard)
+    service.enqueue_summary_pipeline(prompt_id="prompt", limit=25)
+    queue_db.save_summarization_result("missing", title="Done", tags="", summary="Existing summary")
+
+    result = service.process_next(max_jobs=1)
+    jobs = service.list_jobs(job_type="summarize")["jobs"]
+
+    assert result["counts"]["skipped"] == 1
+    assert jobs[0]["status"] == "skipped"
+    assert dashboard.summarized == []
+
+
+def test_pause_summary_pipeline_prevents_summary_claims(queue_db):
+    insert_recording(queue_db, "missing", transcript="Transcript")
+    dashboard = FakeDashboardController()
+    service = ProcessingQueueService(queue_db, dashboard)
+    service.enqueue_summary_pipeline(prompt_id="prompt", limit=25)
+    service.pause_summary_pipeline()
+
+    result = service.process_next(max_jobs=1)
+    jobs = service.list_jobs(job_type="summarize")["jobs"]
+
+    assert result["counts"]["processed"] == 0
+    assert jobs[0]["status"] == "pending"
+    assert dashboard.summarized == []
+
+
+def test_clear_completed_summary_jobs_removes_completed_and_skipped(queue_db):
+    insert_recording(queue_db, "completed", transcript="Transcript")
+    insert_recording(queue_db, "skipped", transcript="Transcript")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+    queue_db.enqueue_processing_jobs("summarize", ["completed"], prompt_id="prompt", summary_provider="local")
+    first_job = [
+        job for job in service.list_jobs(job_type="summarize")["jobs"] if job["recording_name"] == "completed"
+    ][0]
+    queue_db.update_processing_queue_job_status(first_job["id"], "completed")
+    queue_db.enqueue_processing_jobs("summarize", ["skipped"], prompt_id="other", summary_provider="local")
+    second_job = [
+        job for job in service.list_jobs(job_type="summarize")["jobs"] if job["recording_name"] == "skipped"
+    ][0]
+    queue_db.update_processing_queue_job_status(second_job["id"], "skipped")
+
+    result = service.clear_completed_summary_jobs()
+
+    assert result["cleared"] == 2
+    assert service.list_jobs(job_type="summarize")["jobs"] == []

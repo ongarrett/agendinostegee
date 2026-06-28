@@ -227,6 +227,7 @@ class SqliteDBRepository:
                     summary_model   TEXT    DEFAULT NULL,
                     prompt_id       TEXT    DEFAULT NULL,
                     error           TEXT    DEFAULT NULL,
+                    error_history   TEXT    DEFAULT NULL,
                     attempts        INTEGER NOT NULL DEFAULT 0,
                     created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
                     updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -244,6 +245,7 @@ class SqliteDBRepository:
             """)
             self._ensure_column(conn, "processing_queue", "summary_provider", "TEXT DEFAULT NULL")
             self._ensure_column(conn, "processing_queue", "summary_model", "TEXT DEFAULT NULL")
+            self._ensure_column(conn, "processing_queue", "error_history", "TEXT DEFAULT NULL")
             self._migrate_processing_queue_summary_models(conn)
             conn.commit()
         finally:
@@ -2638,6 +2640,7 @@ class SqliteDBRepository:
             "summary_model": row["summary_model"],
             "prompt_id": row["prompt_id"],
             "error": row["error"],
+            "error_history": row["error_history"],
             "attempts": row["attempts"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
@@ -2847,11 +2850,19 @@ class SqliteDBRepository:
         finally:
             conn.close()
 
-    def claim_next_processing_queue_job(self, exclude_job_types: list[str] | None = None) -> dict | None:
+    def claim_next_processing_queue_job(
+        self,
+        exclude_job_types: list[str] | None = None,
+        job_type: str | None = None,
+    ) -> dict | None:
         conn = self._connect()
         try:
             params = []
             excluded_sql = ""
+            job_type_sql = ""
+            if job_type:
+                job_type_sql = "AND job_type = ?"
+                params.append(job_type)
             if exclude_job_types:
                 placeholders = ",".join(["?"] * len(exclude_job_types))
                 excluded_sql = f"AND job_type NOT IN ({placeholders})"
@@ -2861,6 +2872,7 @@ class SqliteDBRepository:
                 SELECT *
                 FROM processing_queue
                 WHERE status = 'pending'
+                  {job_type_sql}
                   {excluded_sql}
                 ORDER BY created_at ASC, id ASC
                 LIMIT 1
@@ -2891,16 +2903,26 @@ class SqliteDBRepository:
         conn = self._connect()
         try:
             completed_expr = "datetime('now')" if status in ("completed", "failed", "skipped") else "completed_at"
+            error_history_expr = (
+                "trim(COALESCE(error_history || char(10), '') || datetime('now') || ' - ' || ?)"
+                if status == "failed" and error
+                else "error_history"
+            )
+            params = [status, error]
+            if status == "failed" and error:
+                params.append(error)
+            params.append(job_id)
             conn.execute(
                 f"""
                 UPDATE processing_queue
                 SET status = ?,
                     error = ?,
+                    error_history = {error_history_expr},
                     completed_at = {completed_expr},
                     updated_at = datetime('now')
                 WHERE id = ?
                 """,
-                (status, error, job_id),
+                params,
             )
             conn.commit()
             row = conn.execute("SELECT * FROM processing_queue WHERE id = ?", (job_id,)).fetchone()
@@ -2949,7 +2971,12 @@ class SqliteDBRepository:
         finally:
             conn.close()
 
-    def retry_failed_processing_jobs(self, job_type: str) -> dict:
+    def retry_failed_processing_jobs(
+        self,
+        job_type: str,
+        summary_provider: str | None = None,
+        summary_model: str | None = None,
+    ) -> dict:
         conn = self._connect()
         try:
             if job_type == "summarize":
@@ -2967,13 +2994,20 @@ class SqliteDBRepository:
                           WHERE s.recording_id = processing_queue.recording_id
                       )
                     """)
-                result = conn.execute("""
+                provider_update_sql = ""
+                provider_params: list[str] = []
+                if summary_provider:
+                    provider_update_sql = ", summary_provider = ?, summary_model = ?"
+                    provider_params = [summary_provider, summary_model]
+
+                result = conn.execute(f"""
                     UPDATE processing_queue
                     SET status = 'pending',
                         error = NULL,
                         started_at = NULL,
                         completed_at = NULL,
                         updated_at = datetime('now')
+                        {provider_update_sql}
                     WHERE job_type = 'summarize'
                       AND status = 'failed'
                       AND NOT EXISTS (
@@ -2981,7 +3015,7 @@ class SqliteDBRepository:
                           FROM summary s
                           WHERE s.recording_id = processing_queue.recording_id
                       )
-                    """)
+                    """, provider_params)
             else:
                 skipped = None
                 result = conn.execute(
@@ -3208,6 +3242,7 @@ class SqliteDBRepository:
                     "total": sum(queue_counts.values()),
                 },
                 "current_job": self._processing_job_from_row(current) if current else None,
+                "average_summary_seconds": int(float(avg_seconds)) if avg_seconds else None,
                 "estimated_seconds_remaining": eta_seconds,
                 "last_updated": last_updated,
             }

@@ -59,13 +59,15 @@ ollama pull qwen3:8b
 ollama pull llama3.1:8b
 ```
 
-In the summarization prompt picker, choose **Local AI (Ollama)** and select `qwen3:8b` or `llama3.1:8b`. Optional `.env` settings:
+Summaries default to **Local AI (Ollama)** with `qwen3:8b`; Gemini remains available when you explicitly select it. Optional `.env` settings:
 
 ```env
-SUMMARY_PROVIDER=gemini
+SUMMARY_PROVIDER=local
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_SUMMARY_MODEL=qwen3:8b
 ```
+
+For large archives, open **Summary Pipeline** in the left navigation. It queues missing summaries durably in SQLite, survives server restarts, and lets you pause, resume, retry failed jobs, or clear completed jobs.
 
 ## Private Remote Access With Tailscale
 

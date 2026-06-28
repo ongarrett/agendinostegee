@@ -29,7 +29,7 @@ def test_get_config_uses_safe_defaults():
     assert config["DATABASE_NAME"] == "agendino.db"
     assert config["GEMINI_MODEL"] == "gemini-2.5-flash"
     assert config["GEMINI_EMBEDDING_MODEL"] == "gemini-embedding-001"
-    assert config["SUMMARY_PROVIDER"] == "gemini"
+    assert config["SUMMARY_PROVIDER"] == "local"
     assert config["OLLAMA_BASE_URL"] == "http://127.0.0.1:11434"
     assert config["OLLAMA_SUMMARY_MODEL"] == "qwen3:8b"
     assert config["AUTH_ENABLED"] == "false"

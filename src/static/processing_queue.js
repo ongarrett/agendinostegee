@@ -1,6 +1,8 @@
 const QUEUE_JOBS_URL = "/api/processing-queue/jobs";
 const QUEUE_PROCESS_NEXT_URL = "/api/processing-queue/process-next";
 const QUEUE_RESUME_URL = "/api/processing-queue/resume";
+const QUEUE_RETRY_SUMMARY_FAILED_URL = "/api/processing-queue/summary-pipeline/retry-failed";
+const QUEUE_CLEAR_SUMMARY_COMPLETED_URL = "/api/processing-queue/summary-pipeline/clear-completed";
 
 const qs = (selector) => document.querySelector(selector);
 const showEl = (el) => el?.classList.remove("d-none");
@@ -21,6 +23,7 @@ function statusBadge(status) {
         running: "bg-primary-subtle text-primary-emphasis",
         completed: "bg-success-subtle text-success-emphasis",
         failed: "bg-danger-subtle text-danger-emphasis",
+        skipped: "bg-warning-subtle text-warning-emphasis",
     };
     return `<span class="badge ${classes[status] || "bg-light text-dark"}">${queueEscapeHtml(status)}</span>`;
 }
@@ -135,6 +138,30 @@ async function processQueue(url, maxJobs, button) {
     }
 }
 
+async function postQueueAction(url, button, successPrefix) {
+    const original = button?.innerHTML;
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Working';
+    }
+    try {
+        const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            throw new Error(data.detail || data.error || "Queue action failed");
+        }
+        showQueueAlert("alert-success", `<i class="bi bi-check-circle me-1"></i>${queueEscapeHtml(data.message || successPrefix)}`);
+        await loadQueue();
+    } catch (err) {
+        showQueueAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>${queueEscapeHtml(err.message)}`);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = original;
+        }
+    }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
     qs("#queue-refresh-btn")?.addEventListener("click", (e) => {
         e.preventDefault();
@@ -147,6 +174,14 @@ document.addEventListener("DOMContentLoaded", () => {
     qs("#queue-resume-btn")?.addEventListener("click", (e) => {
         e.preventDefault();
         processQueue(QUEUE_RESUME_URL, 5, e.currentTarget);
+    });
+    qs("#queue-retry-summary-failed-btn")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        postQueueAction(QUEUE_RETRY_SUMMARY_FAILED_URL, e.currentTarget, "Failed summary jobs queued for retry.");
+    });
+    qs("#queue-clear-summary-completed-btn")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        postQueueAction(QUEUE_CLEAR_SUMMARY_COMPLETED_URL, e.currentTarget, "Completed summary jobs cleared.");
     });
     qs("#queue-status-filter")?.addEventListener("change", loadQueue);
     loadQueue();

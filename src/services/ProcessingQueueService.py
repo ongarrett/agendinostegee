@@ -135,6 +135,10 @@ class ProcessingQueueService:
                 summary_model=summary_model,
             )
         result["pipeline"] = self.summary_pipeline_status()
+        provider_label = (
+            "local summary" if self._normalize_summary_provider(summary_provider) == "local" else "Gemini summary"
+        )
+        result["message"] = f"Queued {result['counts']['enqueued']} {provider_label} job(s)."
         return result
 
     def pause_summary_pipeline(self) -> dict:
@@ -143,16 +147,28 @@ class ProcessingQueueService:
 
     def resume_summary_pipeline(self, max_jobs: int = 5, max_retries: int = 1) -> dict:
         state = self._sqlite_db_repository.set_app_state("summary_pipeline_paused", "false")
-        result = self.process_next(max_jobs=max_jobs, reset_running=True, max_retries=max_retries)
+        result = self.process_next(
+            max_jobs=max_jobs,
+            reset_running=True,
+            max_retries=max_retries,
+            only_job_type="summarize",
+        )
         result["paused"] = False
         result["state"] = state
         result["pipeline"] = self.summary_pipeline_status()
         return result
 
     def retry_failed_summary_jobs(self) -> dict:
-        result = self._sqlite_db_repository.retry_failed_processing_jobs("summarize")
+        result = self._sqlite_db_repository.retry_failed_processing_jobs(
+            "summarize",
+            summary_provider="local",
+            summary_model="qwen3:8b",
+        )
         result["pipeline"] = self.summary_pipeline_status()
-        result["message"] = f"Queued {result['retried']} failed summary job(s) for retry."
+        result["message"] = (
+            f"Queued {result['retried']} failed summary job(s) for local retry "
+            "with Local AI / Ollama / qwen3:8b."
+        )
         return result
 
     def clear_completed_summary_jobs(self) -> dict:
@@ -172,7 +188,7 @@ class ProcessingQueueService:
 
     @staticmethod
     def _normalize_summary_provider(summary_provider: str | None) -> str:
-        selected = (summary_provider or "gemini").strip().lower()
+        selected = (summary_provider or "local").strip().lower()
         if selected in ("local", "local_ai", "ollama"):
             return "local"
         return "gemini"
@@ -183,9 +199,15 @@ class ProcessingQueueService:
             return None
         return OllamaSummarizationService.normalize_model(summary_model)
 
-    def process_next(self, max_jobs: int = 1, reset_running: bool = False, max_retries: int = 0) -> dict:
+    def process_next(
+        self,
+        max_jobs: int = 1,
+        reset_running: bool = False,
+        max_retries: int = 0,
+        only_job_type: str | None = None,
+    ) -> dict:
         if reset_running:
-            self._sqlite_db_repository.reset_running_processing_jobs()
+            self._sqlite_db_repository.reset_running_processing_jobs(job_type=only_job_type)
 
         summary_paused = self._sqlite_db_repository.get_app_state("summary_pipeline_paused", "false") == "true"
         results = []
@@ -202,7 +224,10 @@ class ProcessingQueueService:
         }
         for _ in range(max_jobs):
             exclude_job_types = ["summarize"] if summary_paused else None
-            job = self._sqlite_db_repository.claim_next_processing_queue_job(exclude_job_types=exclude_job_types)
+            job = self._sqlite_db_repository.claim_next_processing_queue_job(
+                exclude_job_types=exclude_job_types,
+                job_type=only_job_type,
+            )
             if not job:
                 break
             result = self._process_job_with_retries(job, max_retries=max_retries)

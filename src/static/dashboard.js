@@ -46,7 +46,7 @@ const QUEUE_TRANSCRIBE_RETRYABLE_URL = "/api/processing-queue/enqueue/transcribe
 const QUEUE_TRANSCRIBE_PENDING_URL = "/api/processing-queue/enqueue/transcribe-pending";
 const QUEUE_SUMMARIZE_NEWEST_URL = "/api/processing-queue/enqueue/summarize-newest";
 const QUEUE_SUMMARIZE_COLLECTION_URL = "/api/processing-queue/enqueue/summarize-collection";
-const QUEUE_SUMMARIZE_MISSING_URL = "/api/processing-queue/enqueue/summarize-missing";
+const SUMMARY_PIPELINE_ENQUEUE_URL = "/api/processing-queue/summary-pipeline/enqueue";
 const MARK_NO_SPEECH_SKIPPED_URL = "/api/dashboard/transcription/no-speech/skip";
 
 const show = (el) => el?.classList.remove("d-none");
@@ -916,6 +916,10 @@ async function loadDashboard() {
         $("#health-corrupt").textContent = data.counts.corrupt_audio || 0;
         $("#health-very-short").textContent = data.counts.very_short || 0;
         $("#health-missing-summary").textContent = data.counts.missing_summaries || 0;
+        const summaryPipeline = data.summary_pipeline || {};
+        const summaryPipelineCounts = summaryPipeline.counts || {};
+        $("#health-summary-queued").textContent = summaryPipelineCounts.queued || summaryPipelineCounts.pending || 0;
+        $("#health-summary-failed").textContent = summaryPipelineCounts.failed || 0;
 
         if (data.device.connected) {
             $("#device-status").textContent = "Connected";
@@ -1325,9 +1329,11 @@ document.addEventListener("DOMContentLoaded", () => {
             const counts = data.counts || {};
             const message = data.message || `Queued ${counts.enqueued || 0} job(s).`;
             const providerSuffix = providerText ? `${providerText}.` : "";
+            const queueHref = url.includes("summary-pipeline") ? "/summary-pipeline" : "/processing-queue";
+            const queueLabel = url.includes("summary-pipeline") ? "Open Summary Pipeline" : "Open Processing Queue";
             showDashboardAlert(
                 "alert-success",
-                `<i class="bi bi-check-circle me-1"></i>${escapeHtml(message)}${escapeHtml(providerSuffix)} <a href="/processing-queue" class="alert-link">Open Processing Queue</a>`
+                `<i class="bi bi-check-circle me-1"></i>${escapeHtml(message)}${escapeHtml(providerSuffix)} <a href="${queueHref}" class="alert-link">${queueLabel}</a>`
             );
         } catch (err) {
             showDashboardAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>Queue request failed: ${escapeHtml(err.message)}`);
@@ -1515,7 +1521,15 @@ document.addEventListener("DOMContentLoaded", () => {
     if (summarizeMissingBtn) {
         summarizeMissingBtn.addEventListener("click", (e) => {
             e.preventDefault();
-            openPromptPicker("recordings missing summaries", { mode: "missing" });
+            openPromptPicker("all recordings missing summaries", {
+                mode: "queue",
+                queue: {
+                    url: SUMMARY_PIPELINE_ENQUEUE_URL,
+                    payload: {},
+                    triggerBtn: summarizeMissingBtn,
+                    label: "all missing summaries",
+                },
+            });
         });
     }
     if (queueTranscribe25Btn) {
@@ -1652,7 +1666,7 @@ document.addEventListener("DOMContentLoaded", () => {
             openPromptPicker("all recordings missing summaries", {
                 mode: "queue",
                 queue: {
-                    url: QUEUE_SUMMARIZE_MISSING_URL,
+                    url: SUMMARY_PIPELINE_ENQUEUE_URL,
                     payload: {},
                     triggerBtn: queueSummarizeMissingBtn,
                     label: "all missing summaries",

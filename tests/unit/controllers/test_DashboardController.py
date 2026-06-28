@@ -405,7 +405,7 @@ class TestDashboardControllerSummarizeRecording:
         ctrl = mock_services["controller"]
         mock_services["sqlite_db"].get_transcript.return_value = "transcript text"
         mock_services["system_prompts_repo"].get_prompt_content.return_value = "Be concise."
-        mock_services["summarization_service"].summarize.return_value = {
+        mock_services["ollama_summarization_service"].summarize.return_value = {
             "title": "Result Title",
             "tags": ["tag1", "tag2"],
             "summary": "Result summary",
@@ -416,17 +416,39 @@ class TestDashboardControllerSummarizeRecording:
         assert result["title"] == "Result Title"
         assert result["tags"] == ["tag1", "tag2"]
         assert result["summary"] == "Result summary"
+        assert result["summary_provider"] == "local"
+        assert result["summary_model"] == "qwen3:8b"
         mock_services["sqlite_db"].save_summarization_result.assert_called_once()
+        mock_services["summarization_service"].summarize.assert_not_called()
 
     def test_summarization_failure(self, mock_services):
         ctrl = mock_services["controller"]
         mock_services["sqlite_db"].get_transcript.return_value = "transcript"
         mock_services["system_prompts_repo"].get_prompt_content.return_value = "prompt"
-        mock_services["summarization_service"].summarize.side_effect = Exception("API error")
+        mock_services["ollama_summarization_service"].summarize.side_effect = Exception("API error")
 
         result = ctrl.summarize_recording("test", "prompt_id")
         assert result["ok"] is False
         assert "Summarization failed" in result["error"]
+
+    def test_gemini_summarization_is_available_when_explicitly_selected(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["sqlite_db"].get_transcript.return_value = "transcript text"
+        mock_services["system_prompts_repo"].get_prompt_content.return_value = "Be concise."
+        mock_services["summarization_service"].summarize.return_value = {
+            "title": "Gemini Title",
+            "tags": ["gemini"],
+            "summary": "Gemini summary",
+        }
+        mock_services["sqlite_db"].save_summarization_result.return_value = MagicMock(id=1, version=1)
+
+        result = ctrl.summarize_recording("test", "prompt_id", summary_provider="gemini")
+
+        assert result["ok"] is True
+        assert result["summary_provider"] == "gemini"
+        assert result["summary_model"] is None
+        mock_services["summarization_service"].summarize.assert_called_once()
+        mock_services["ollama_summarization_service"].summarize.assert_not_called()
 
     def test_local_summarization_uses_ollama_service(self, mock_services):
         ctrl = mock_services["controller"]
@@ -484,7 +506,7 @@ class TestDashboardControllerSummarizeRecording:
             id=1, name="test", label="Test", duration=10, created_at=datetime.now(), transcript="text"
         )
         mock_services["sqlite_db"].get_transcript.return_value = "text"
-        mock_services["summarization_service"].summarize.return_value = {
+        mock_services["ollama_summarization_service"].summarize.return_value = {
             "title": "Generated",
             "tags": ["tag"],
             "summary": "Summary",
@@ -516,7 +538,7 @@ class TestDashboardControllerSummarizeRecording:
         assert result["ok"] is True
         assert result["counts"]["skipped_existing"] == 1
         assert result["results"][0]["status"] == "skipped_existing"
-        mock_services["summarization_service"].summarize.assert_not_called()
+        mock_services["ollama_summarization_service"].summarize.assert_not_called()
         mock_services["sqlite_db"].save_summarization_result.assert_not_called()
 
     def test_summarize_recordings_continues_after_failure(self, mock_services):
@@ -535,7 +557,7 @@ class TestDashboardControllerSummarizeRecording:
 
         mock_services["sqlite_db"].get_recording_by_name.side_effect = get_recording
         mock_services["sqlite_db"].get_transcript.return_value = "text"
-        mock_services["summarization_service"].summarize.side_effect = [
+        mock_services["ollama_summarization_service"].summarize.side_effect = [
             Exception("API error"),
             {"title": "Generated", "tags": [], "summary": "Summary"},
         ]

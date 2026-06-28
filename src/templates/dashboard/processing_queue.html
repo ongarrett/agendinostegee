@@ -26,6 +26,12 @@
                     <button class="btn btn-sm btn-primary" id="queue-resume-btn">
                         <i class="bi bi-skip-forward-fill me-1"></i>Resume Pending
                     </button>
+                    <button class="btn btn-sm btn-outline-danger" id="queue-retry-summary-failed-btn">
+                        <i class="bi bi-arrow-repeat me-1"></i>Retry Failed Summaries
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="queue-clear-summary-completed-btn">
+                        <i class="bi bi-trash3 me-1"></i>Clear Completed Summaries
+                    </button>
                 </div>
             </div>
             <div class="card-body">
@@ -56,7 +62,11 @@
                         <option value="running">Running</option>
                         <option value="completed">Completed</option>
                         <option value="failed">Failed</option>
+                        <option value="skipped">Skipped</option>
                     </select>
+                    <a class="btn btn-sm btn-outline-primary ms-auto" href="/summary-pipeline">
+                        <i class="bi bi-stars me-1"></i>Open Summary Pipeline
+                    </a>
                 </div>
                 <div id="queue-loading" class="text-center p-4">
                     <div class="spinner-border text-primary" role="status">
