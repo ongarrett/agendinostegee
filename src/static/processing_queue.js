@@ -157,7 +157,13 @@ async function postQueueAction(url, button, successPrefix, confirmationMessage =
         if (!res.ok || !data.ok) {
             throw new Error(data.detail || data.error || "Queue action failed");
         }
-        showQueueAlert("alert-success", `<i class="bi bi-check-circle me-1"></i>${queueEscapeHtml(data.message || successPrefix)}`);
+        const cleared = data.cleared || data.retried || 0;
+        const alertClass = cleared ? "alert-success" : "alert-info";
+        const iconClass = cleared ? "bi-check-circle" : "bi-info-circle";
+        showQueueAlert(
+            alertClass,
+            `<i class="bi ${iconClass} me-1"></i>${queueEscapeHtml(data.message || successPrefix)}`
+        );
         await loadQueue();
     } catch (err) {
         showQueueAlert("alert-danger", `<i class="bi bi-exclamation-triangle me-1"></i>${queueEscapeHtml(err.message)}`);

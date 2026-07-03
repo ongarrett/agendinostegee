@@ -1,3 +1,5 @@
+import logging
+
 from controllers.DashboardController import DashboardController
 from repositories.SqliteDBRepository import SqliteDBRepository
 from services.OllamaSummarizationService import OllamaSummarizationService
@@ -5,6 +7,8 @@ from services.OllamaSummarizationService import OllamaSummarizationService
 LOCAL_OLLAMA_UNAVAILABLE_MESSAGE = (
     "Local AI/Ollama is not available. Start Ollama with `ollama serve` and confirm qwen3:8b is installed."
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessingQueueService:
@@ -176,32 +180,52 @@ class ProcessingQueueService:
         return result
 
     def clear_completed_jobs(self, job_type: str = "all") -> dict:
-        normalized_job_type = self._normalize_cleanup_job_type(job_type)
-        result = self._sqlite_db_repository.clear_processing_jobs(normalized_job_type, ("completed", "skipped"))
-        result["message"] = self._completed_cleanup_message(normalized_job_type)
+        requested_job_type = job_type or "all"
+        normalized_job_type = self._normalize_cleanup_job_type(requested_job_type)
+        result = self._sqlite_db_repository.clear_processing_jobs(normalized_job_type, ("completed",))
+        result["message"] = self._completed_cleanup_message(normalized_job_type, result["cleared"])
+        self._log_cleanup_action(requested_job_type, normalized_job_type, ("completed",), result["cleared"])
         return result
 
     def clear_failed_jobs(self) -> dict:
         result = self._sqlite_db_repository.clear_processing_jobs(None, ("failed",))
-        result["message"] = "Failed jobs cleared."
+        result["message"] = "Failed jobs cleared." if result["cleared"] else "No failed jobs to clear."
+        self._log_cleanup_action("all", None, ("failed",), result["cleared"])
         return result
 
     @staticmethod
     def _normalize_cleanup_job_type(job_type: str | None) -> str | None:
         selected = (job_type or "all").strip().lower()
-        if selected == "summarize":
+        if selected in ("summarize", "summary", "summaries"):
             return "summarize"
-        if selected == "transcribe":
+        if selected in ("transcribe", "transcription", "transcriptions"):
             return "transcribe"
-        return None
+        if selected == "all":
+            return None
+        raise ValueError(f"Unsupported cleanup job type: {job_type}")
 
     @staticmethod
-    def _completed_cleanup_message(job_type: str | None) -> str:
+    def _completed_cleanup_message(job_type: str | None, cleared: int) -> str:
         if job_type == "summarize":
-            return "Completed summary jobs cleared."
+            return "Completed summary jobs cleared." if cleared else "No completed summary jobs to clear."
         if job_type == "transcribe":
-            return "Completed transcription jobs cleared."
-        return "All completed jobs cleared."
+            return "Completed transcription jobs cleared." if cleared else "No completed transcription jobs to clear."
+        return "All completed jobs cleared." if cleared else "No completed jobs to clear."
+
+    @staticmethod
+    def _log_cleanup_action(
+        requested_job_type: str,
+        normalized_job_type: str | None,
+        statuses: tuple[str, ...],
+        cleared: int,
+    ) -> None:
+        logger.info(
+            "Processing queue cleanup requested job_type=%s normalized_job_type=%s statuses=%s cleared=%d",
+            requested_job_type,
+            normalized_job_type or "all",
+            ",".join(statuses),
+            cleared,
+        )
 
     @staticmethod
     def _with_selection_count(result: dict, selected_count: int) -> dict:
