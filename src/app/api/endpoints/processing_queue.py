@@ -148,6 +148,21 @@ async def clear_completed_summary_jobs(
     return processing_queue_service.clear_completed_summary_jobs()
 
 
+@router.post("/clear-completed/{job_type}")
+async def clear_completed_jobs(
+    job_type: str,
+    processing_queue_service: ProcessingQueueService = Depends(depends.get_processing_queue_service),
+):
+    return processing_queue_service.clear_completed_jobs(job_type=job_type)
+
+
+@router.post("/clear-failed")
+async def clear_failed_jobs(
+    processing_queue_service: ProcessingQueueService = Depends(depends.get_processing_queue_service),
+):
+    return processing_queue_service.clear_failed_jobs()
+
+
 @router.post("/process-next")
 async def process_next_job(
     body: ProcessQueueRequestDTO = ProcessQueueRequestDTO(),

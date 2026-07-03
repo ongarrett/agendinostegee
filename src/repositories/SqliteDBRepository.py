@@ -3000,7 +3000,8 @@ class SqliteDBRepository:
                     provider_update_sql = ", summary_provider = ?, summary_model = ?"
                     provider_params = [summary_provider, summary_model]
 
-                result = conn.execute(f"""
+                result = conn.execute(
+                    f"""
                     UPDATE processing_queue
                     SET status = 'pending',
                         error = NULL,
@@ -3015,7 +3016,9 @@ class SqliteDBRepository:
                           FROM summary s
                           WHERE s.recording_id = processing_queue.recording_id
                       )
-                    """, provider_params)
+                    """,
+                    provider_params,
+                )
             else:
                 skipped = None
                 result = conn.execute(
@@ -3040,19 +3043,21 @@ class SqliteDBRepository:
         finally:
             conn.close()
 
-    def clear_processing_jobs(self, job_type: str, statuses: tuple[str, ...]) -> dict:
+    def clear_processing_jobs(self, job_type: str | None, statuses: tuple[str, ...]) -> dict:
         if not statuses:
             return {"ok": True, "cleared": 0}
         conn = self._connect()
         try:
             placeholders = ",".join(["?"] * len(statuses))
+            job_type_filter = "job_type = ? AND" if job_type else ""
+            params = (job_type, *statuses) if job_type else statuses
             result = conn.execute(
                 f"""
                 DELETE FROM processing_queue
-                WHERE job_type = ?
-                  AND status IN ({placeholders})
+                WHERE {job_type_filter}
+                  status IN ({placeholders})
                 """,
-                (job_type, *statuses),
+                params,
             )
             conn.commit()
             return {"ok": True, "cleared": result.rowcount}

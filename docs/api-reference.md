@@ -47,6 +47,8 @@ Full list of REST endpoints. Interactive Swagger UI is available at `http://127.
 | `POST` | `/api/processing-queue/summary-pipeline/resume` | Resume and process summary jobs |
 | `POST` | `/api/processing-queue/summary-pipeline/retry-failed` | Requeue failed summary jobs |
 | `POST` | `/api/processing-queue/summary-pipeline/clear-completed` | Clear completed/skipped summary jobs |
+| `POST` | `/api/processing-queue/clear-completed/{job_type}` | Clear completed/skipped queue history for `summarize`, `transcribe`, or `all` |
+| `POST` | `/api/processing-queue/clear-failed` | Clear failed queue history only |
 
 ## Calendar - `/api/calendar`
 

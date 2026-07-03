@@ -166,16 +166,42 @@ class ProcessingQueueService:
         )
         result["pipeline"] = self.summary_pipeline_status()
         result["message"] = (
-            f"Queued {result['retried']} failed summary job(s) for local retry "
-            "with Local AI / Ollama / qwen3:8b."
+            f"Queued {result['retried']} failed summary job(s) for local retry " "with Local AI / Ollama / qwen3:8b."
         )
         return result
 
     def clear_completed_summary_jobs(self) -> dict:
-        result = self._sqlite_db_repository.clear_processing_jobs("summarize", ("completed", "skipped"))
+        result = self.clear_completed_jobs(job_type="summarize")
         result["pipeline"] = self.summary_pipeline_status()
-        result["message"] = f"Cleared {result['cleared']} completed/skipped summary job(s)."
         return result
+
+    def clear_completed_jobs(self, job_type: str = "all") -> dict:
+        normalized_job_type = self._normalize_cleanup_job_type(job_type)
+        result = self._sqlite_db_repository.clear_processing_jobs(normalized_job_type, ("completed", "skipped"))
+        result["message"] = self._completed_cleanup_message(normalized_job_type)
+        return result
+
+    def clear_failed_jobs(self) -> dict:
+        result = self._sqlite_db_repository.clear_processing_jobs(None, ("failed",))
+        result["message"] = "Failed jobs cleared."
+        return result
+
+    @staticmethod
+    def _normalize_cleanup_job_type(job_type: str | None) -> str | None:
+        selected = (job_type or "all").strip().lower()
+        if selected == "summarize":
+            return "summarize"
+        if selected == "transcribe":
+            return "transcribe"
+        return None
+
+    @staticmethod
+    def _completed_cleanup_message(job_type: str | None) -> str:
+        if job_type == "summarize":
+            return "Completed summary jobs cleared."
+        if job_type == "transcribe":
+            return "Completed transcription jobs cleared."
+        return "All completed jobs cleared."
 
     @staticmethod
     def _with_selection_count(result: dict, selected_count: int) -> dict:

@@ -475,3 +475,65 @@ def test_clear_completed_summary_jobs_removes_completed_and_skipped(queue_db):
 
     assert result["cleared"] == 2
     assert service.list_jobs(job_type="summarize")["jobs"] == []
+
+
+def test_clear_completed_transcription_jobs_removes_only_transcription_history(queue_db):
+    insert_recording(queue_db, "transcribed", transcript="Transcript")
+    insert_recording(queue_db, "summarized", transcript="Transcript", summary="Summary")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+    queue_db.enqueue_processing_jobs("transcribe", ["transcribed"], engine="whisper")
+    transcribe_job = service.list_jobs(job_type="transcribe")["jobs"][0]
+    queue_db.update_processing_queue_job_status(transcribe_job["id"], "completed")
+    queue_db.enqueue_processing_jobs("summarize", ["summarized"], prompt_id="prompt", summary_provider="local")
+    summarize_job = service.list_jobs(job_type="summarize")["jobs"][0]
+    queue_db.update_processing_queue_job_status(summarize_job["id"], "completed")
+
+    result = service.clear_completed_jobs(job_type="transcribe")
+
+    assert result["cleared"] == 1
+    assert result["message"] == "Completed transcription jobs cleared."
+    assert service.list_jobs(job_type="transcribe")["jobs"] == []
+    assert len(service.list_jobs(job_type="summarize")["jobs"]) == 1
+    assert queue_db.get_recording_by_name("transcribed").transcript == "Transcript"
+
+
+def test_clear_all_completed_jobs_preserves_failed_jobs_and_recording_content(queue_db):
+    insert_recording(queue_db, "transcribed", transcript="Transcript")
+    insert_recording(queue_db, "summarized", transcript="Transcript", summary="Summary")
+    insert_recording(queue_db, "failed", transcript="Keep me")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+    queue_db.enqueue_processing_jobs("transcribe", ["transcribed"], engine="whisper")
+    queue_db.enqueue_processing_jobs("summarize", ["summarized"], prompt_id="prompt", summary_provider="local")
+    queue_db.enqueue_processing_jobs("transcribe", ["failed"], engine="whisper")
+    for job in service.list_jobs()["jobs"]:
+        if job["recording_name"] == "failed":
+            queue_db.update_processing_queue_job_status(job["id"], "failed", error="debug me")
+        else:
+            queue_db.update_processing_queue_job_status(job["id"], "completed")
+
+    result = service.clear_completed_jobs(job_type="all")
+    remaining_jobs = service.list_jobs()["jobs"]
+
+    assert result["cleared"] == 2
+    assert result["message"] == "All completed jobs cleared."
+    assert [job["status"] for job in remaining_jobs] == ["failed"]
+    assert remaining_jobs[0]["recording_name"] == "failed"
+    assert queue_db.get_recording_by_name("transcribed").transcript == "Transcript"
+    assert queue_db.get_recording_by_name("summarized").summary == "Summary"
+    assert queue_db.get_recording_by_name("failed").transcript == "Keep me"
+
+
+def test_clear_failed_jobs_is_separate_from_completed_cleanup(queue_db):
+    insert_recording(queue_db, "failed")
+    service = ProcessingQueueService(queue_db, FakeDashboardController())
+    queue_db.enqueue_processing_jobs("transcribe", ["failed"], engine="whisper")
+    job = service.list_jobs()["jobs"][0]
+    queue_db.update_processing_queue_job_status(job["id"], "failed", error="debug me")
+
+    completed_result = service.clear_completed_jobs(job_type="all")
+    failed_result = service.clear_failed_jobs()
+
+    assert completed_result["cleared"] == 0
+    assert failed_result["cleared"] == 1
+    assert failed_result["message"] == "Failed jobs cleared."
+    assert service.list_jobs()["jobs"] == []

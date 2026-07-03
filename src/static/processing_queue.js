@@ -3,6 +3,10 @@ const QUEUE_PROCESS_NEXT_URL = "/api/processing-queue/process-next";
 const QUEUE_RESUME_URL = "/api/processing-queue/resume";
 const QUEUE_RETRY_SUMMARY_FAILED_URL = "/api/processing-queue/summary-pipeline/retry-failed";
 const QUEUE_CLEAR_SUMMARY_COMPLETED_URL = "/api/processing-queue/summary-pipeline/clear-completed";
+const QUEUE_CLEAR_TRANSCRIPTION_COMPLETED_URL = "/api/processing-queue/clear-completed/transcribe";
+const QUEUE_CLEAR_ALL_COMPLETED_URL = "/api/processing-queue/clear-completed/all";
+const QUEUE_CLEAR_FAILED_URL = "/api/processing-queue/clear-failed";
+const QUEUE_HISTORY_ONLY_NOTE = "This only clears queue history. It does not delete recordings, transcripts, or summaries.";
 
 const qs = (selector) => document.querySelector(selector);
 const showEl = (el) => el?.classList.remove("d-none");
@@ -138,7 +142,10 @@ async function processQueue(url, maxJobs, button) {
     }
 }
 
-async function postQueueAction(url, button, successPrefix) {
+async function postQueueAction(url, button, successPrefix, confirmationMessage = "") {
+    if (confirmationMessage && !window.confirm(`${confirmationMessage}\n\n${QUEUE_HISTORY_ONLY_NOTE}`)) {
+        return;
+    }
     const original = button?.innerHTML;
     if (button) {
         button.disabled = true;
@@ -181,7 +188,39 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     qs("#queue-clear-summary-completed-btn")?.addEventListener("click", (e) => {
         e.preventDefault();
-        postQueueAction(QUEUE_CLEAR_SUMMARY_COMPLETED_URL, e.currentTarget, "Completed summary jobs cleared.");
+        postQueueAction(
+            QUEUE_CLEAR_SUMMARY_COMPLETED_URL,
+            e.currentTarget,
+            "Completed summary jobs cleared.",
+            "Clear completed summary jobs?"
+        );
+    });
+    qs("#queue-clear-transcription-completed-btn")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        postQueueAction(
+            QUEUE_CLEAR_TRANSCRIPTION_COMPLETED_URL,
+            e.currentTarget,
+            "Completed transcription jobs cleared.",
+            "Clear completed transcription jobs?"
+        );
+    });
+    qs("#queue-clear-all-completed-btn")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        postQueueAction(
+            QUEUE_CLEAR_ALL_COMPLETED_URL,
+            e.currentTarget,
+            "All completed jobs cleared.",
+            "Clear all completed jobs?"
+        );
+    });
+    qs("#queue-clear-failed-btn")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        postQueueAction(
+            QUEUE_CLEAR_FAILED_URL,
+            e.currentTarget,
+            "Failed jobs cleared.",
+            "Clear failed jobs? This removes failed queue history that may be useful for debugging."
+        );
     });
     qs("#queue-status-filter")?.addEventListener("change", loadQueue);
     loadQueue();
