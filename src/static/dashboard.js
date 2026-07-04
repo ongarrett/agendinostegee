@@ -152,15 +152,15 @@ function actionButtons(rec) {
         item("btn-play-audio", `data-name="${rec.name}"`, "bi-play-circle", "Play audio");
         if (!rec.has_transcript) {
             btns.push(`<div class="btn-group btn-group-sm transcribe-split" style="position:relative">
-                <button class="btn btn-outline-primary btn-transcribe" data-name="${rec.name}" data-engine="gemini" title="Transcribe with Gemini"><i class="bi bi-mic"></i></button>
-                <button type="button" class="btn btn-outline-primary btn-transcribe-toggle" data-name="${rec.name}" title="Choose engine" style="padding-left:3px;padding-right:3px;border-left:0"><i class="bi bi-caret-down-fill" style="font-size:.55em"></i></button>
+                <button class="btn btn-outline-primary btn-transcribe" data-name="${rec.name}" data-engine="whisper" title="Transcribe with local Whisper"><i class="bi bi-mic"></i></button>
+                <button type="button" class="btn btn-outline-primary btn-transcribe-toggle" data-name="${rec.name}" title="Choose transcription engine. Local Whisper is the default; Gemini runs only when selected." style="padding-left:3px;padding-right:3px;border-left:0"><i class="bi bi-caret-down-fill" style="font-size:.55em"></i></button>
                 <div class="transcribe-engine-menu d-none" style="position:absolute;top:100%;right:0;z-index:1050;min-width:160px;background:var(--bs-body-bg);border:1px solid var(--bs-border-color);border-radius:.375rem;box-shadow:0 .5rem 1rem rgba(0,0,0,.15);margin-top:2px">
-                    <a href="#" class="btn-transcribe-engine d-flex align-items-center gap-2 px-3 py-2 text-decoration-none text-body" data-name="${rec.name}" data-engine="gemini" style="font-size:.85rem"><i class="bi bi-cloud"></i> Gemini</a>
-                    <a href="#" class="btn-transcribe-engine d-flex align-items-center gap-2 px-3 py-2 text-decoration-none text-body" data-name="${rec.name}" data-engine="whisper" style="font-size:.85rem;border-top:1px solid var(--bs-border-color)"><i class="bi bi-pc-display"></i> Whisper (local)</a>
+                    <a href="#" class="btn-transcribe-engine d-flex align-items-center gap-2 px-3 py-2 text-decoration-none text-body" data-name="${rec.name}" data-engine="whisper" style="font-size:.85rem"><i class="bi bi-pc-display"></i> Local Whisper</a>
+                    <a href="#" class="btn-transcribe-engine d-flex align-items-center gap-2 px-3 py-2 text-decoration-none text-body" data-name="${rec.name}" data-engine="gemini" style="font-size:.85rem;border-top:1px solid var(--bs-border-color)"><i class="bi bi-cloud"></i> Gemini optional</a>
                 </div>
             </div>`);
+            item("btn-transcribe", `data-name="${rec.name}" data-engine="whisper"`, "bi-pc-display", "Transcribe with Local Whisper");
             item("btn-transcribe", `data-name="${rec.name}" data-engine="gemini"`, "bi-cloud", "Transcribe with Gemini");
-            item("btn-transcribe", `data-name="${rec.name}" data-engine="whisper"`, "bi-pc-display", "Transcribe with Whisper");
         }
     }
     if (rec.has_transcript) {
@@ -247,9 +247,9 @@ function mobileCardActionMenu(rec) {
     item("btn-summarize", `data-name="${rec.name}"`, "bi-stars", "Generate Summary", !rec.has_transcript);
     item(
         "btn-transcribe",
-        `data-name="${rec.name}" data-engine="gemini"`,
+        `data-name="${rec.name}" data-engine="whisper"`,
         "bi-mic",
-        "Transcribe",
+        "Transcribe with Local Whisper",
         rec.has_transcript || !rec.on_local
     );
 
@@ -910,16 +910,23 @@ async function loadDashboard() {
         $("#count-db").textContent = data.counts.db;
         $("#health-total").textContent = data.counts.total_recordings || 0;
         $("#health-transcribed").textContent = data.counts.transcribed || 0;
-        $("#health-pending").textContent = data.counts.pending_transcription || 0;
-        $("#health-retryable").textContent = data.counts.retryable_failures || 0;
+        $("#health-awaiting-transcription").textContent = data.counts.awaiting_transcription || 0;
         $("#health-no-speech").textContent = data.counts.no_speech_detected || 0;
         $("#health-corrupt").textContent = data.counts.corrupt_audio || 0;
         $("#health-very-short").textContent = data.counts.very_short || 0;
         $("#health-missing-summary").textContent = data.counts.missing_summaries || 0;
         const summaryPipeline = data.summary_pipeline || {};
         const summaryPipelineCounts = summaryPipeline.counts || {};
-        $("#health-summary-queued").textContent = summaryPipelineCounts.queued || summaryPipelineCounts.pending || 0;
-        $("#health-summary-failed").textContent = summaryPipelineCounts.failed || 0;
+        $("#health-summary-queued").textContent = data.counts.summary_queued || summaryPipelineCounts.queued || summaryPipelineCounts.pending || 0;
+        $("#health-summary-failed").textContent = data.counts.summary_failed || summaryPipelineCounts.failed || 0;
+        $("#health-missing-embedding").textContent = data.counts.missing_embeddings || 0;
+        $("#health-indexed").textContent = data.counts.indexed || 0;
+        const nextAction = data.work_remaining || {};
+        const nextActionEl = $("#archive-next-action");
+        if (nextActionEl) {
+            nextActionEl.innerHTML = `<i class="bi bi-compass me-1"></i>${escapeHtml(nextAction.label || "Archive status ready")}`;
+            nextActionEl.dataset.action = nextAction.action || "";
+        }
 
         if (data.device.connected) {
             $("#device-status").textContent = "Connected";
@@ -996,6 +1003,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const indexCollectionBtn = $("#btn-index-collection");
     const indexUnindexedBtn = $("#btn-index-unindexed");
     const transcribeUntranscribedBtn = $("#btn-transcribe-untranscribed");
+    const transcribeAwaitingBtn = $("#btn-transcribe-awaiting");
+    const generateMissingSummariesBtn = $("#btn-generate-missing-summaries");
+    const generateMissingEmbeddingsBtn = $("#btn-generate-missing-embeddings");
     const bulkTranscribeBtn = $("#btn-bulk-transcribe");
     const summarizeMissingBtn = $("#btn-summarize-missing");
     const bulkSummarizeBtn = $("#btn-bulk-summarize");
@@ -1197,7 +1207,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const endpoint = untranscribed ? BULK_TRANSCRIBE_UNTRANSCRIBED_URL : BULK_TRANSCRIBE_SELECTED_URL;
         const payload = untranscribed ? { engine: "whisper" } : { names, engine: "whisper" };
-        const label = untranscribed ? "untranscribed recordings" : `${names.length} selected recording(s)`;
+        const label = untranscribed ? "recordings awaiting transcription" : `${names.length} selected recording(s)`;
 
         if (!window.confirm(`Transcribe ${label} with local Whisper? Existing transcripts will be skipped.`)) {
             return;
@@ -1512,10 +1522,22 @@ document.addEventListener("DOMContentLoaded", () => {
             generateUnindexedEmbeddings();
         });
     }
+    if (generateMissingEmbeddingsBtn) {
+        generateMissingEmbeddingsBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            generateUnindexedEmbeddings();
+        });
+    }
     if (transcribeUntranscribedBtn) {
         transcribeUntranscribedBtn.addEventListener("click", (e) => {
             e.preventDefault();
             runBulkTranscription({ untranscribed: true, triggerBtn: transcribeUntranscribedBtn });
+        });
+    }
+    if (transcribeAwaitingBtn) {
+        transcribeAwaitingBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            runBulkTranscription({ untranscribed: true, triggerBtn: transcribeAwaitingBtn });
         });
     }
     if (summarizeMissingBtn) {
@@ -1527,6 +1549,20 @@ document.addEventListener("DOMContentLoaded", () => {
                     url: SUMMARY_PIPELINE_ENQUEUE_URL,
                     payload: {},
                     triggerBtn: summarizeMissingBtn,
+                    label: "all missing summaries",
+                },
+            });
+        });
+    }
+    if (generateMissingSummariesBtn) {
+        generateMissingSummariesBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            openPromptPicker("all recordings missing summaries", {
+                mode: "queue",
+                queue: {
+                    url: SUMMARY_PIPELINE_ENQUEUE_URL,
+                    payload: {},
+                    triggerBtn: generateMissingSummariesBtn,
                     label: "all missing summaries",
                 },
             });
@@ -3248,7 +3284,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (engineItem) {
             e.preventDefault();
             const name = engineItem.dataset.name;
-            const engine = engineItem.dataset.engine || "gemini";
+            const engine = engineItem.dataset.engine || "whisper";
             // Close menu
             document.querySelectorAll(".transcribe-engine-menu").forEach(m => m.classList.add("d-none"));
             // Find the main button for spinner
@@ -3262,7 +3298,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (transcribeBtn) {
             e.preventDefault();
             const name = transcribeBtn.dataset.name;
-            const engine = transcribeBtn.dataset.engine || "gemini";
+            const engine = transcribeBtn.dataset.engine || "whisper";
             await startTranscription(name, engine, transcribeBtn);
         }
 
@@ -3530,8 +3566,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     ? "Transcribe this recording or import a text file to make it reviewable."
                     : "No transcript is stored for this recording.",
                 hasLocalAudio
-                    ? `<button class="btn btn-sm btn-outline-primary btn-transcribe" data-name="${escapeHtml(name)}" data-engine="gemini">
-                        <i class="bi bi-mic me-1"></i>Transcribe
+                    ? `<button class="btn btn-sm btn-outline-primary btn-transcribe" data-name="${escapeHtml(name)}" data-engine="whisper" title="Local Whisper is the default transcription engine">
+                        <i class="bi bi-mic me-1"></i>Transcribe with Local Whisper
                     </button>`
                     : ""
             );

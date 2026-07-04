@@ -116,6 +116,7 @@ class DashboardController:
             "total_recordings": len(recordings),
             "transcribed": 0,
             "pending_transcription": 0,
+            "awaiting_transcription": 0,
             "retryable_failures": 0,
             "no_speech_detected": 0,
             "corrupt_audio": 0,
@@ -123,11 +124,14 @@ class DashboardController:
             "unknown_transcription": 0,
             "missing_summaries": 0,
             "missing_embeddings": 0,
+            "indexed": 0,
         }
         for rec in db_recordings:
             status = rec.get("transcription_status") or "unknown"
             if rec.get("has_transcript"):
                 counts["transcribed"] += 1
+            elif status in ("pending", "retryable_failure", "unknown"):
+                counts["awaiting_transcription"] += 1
             if status == "pending":
                 counts["pending_transcription"] += 1
             elif status == "retryable_failure":
@@ -142,9 +146,37 @@ class DashboardController:
                 counts["unknown_transcription"] += 1
             if rec.get("has_transcript") and not rec.get("has_summary"):
                 counts["missing_summaries"] += 1
-            if rec.get("embedding_status") != "indexed":
+            if rec.get("embedding_status") == "indexed":
+                counts["indexed"] += 1
+            else:
                 counts["missing_embeddings"] += 1
         return counts
+
+    @staticmethod
+    def _work_remaining_recommendation(counts: dict) -> dict:
+        if counts.get("awaiting_transcription", 0) > 0:
+            return {
+                "key": "transcribe",
+                "label": "Next: Transcribe awaiting recordings",
+                "action": "transcribe_awaiting",
+            }
+        if counts.get("missing_summaries", 0) > 0:
+            return {
+                "key": "summaries",
+                "label": "Next: Generate missing summaries",
+                "action": "generate_missing_summaries",
+            }
+        if counts.get("missing_embeddings", 0) > 0:
+            return {
+                "key": "embeddings",
+                "label": "Next: Generate embeddings",
+                "action": "index_unindexed",
+            }
+        return {
+            "key": "complete",
+            "label": "Archive is fully processed",
+            "action": None,
+        }
 
     def get_recordings_status(self) -> dict:
         local_files = self._local_recordings_repository.get_all()
@@ -261,6 +293,13 @@ class DashboardController:
         folders = self._sqlite_db_repository.get_recording_folders()
 
         archive_counts = self._archive_health_counts(recordings)
+        summary_pipeline = self._sqlite_db_repository.get_summary_pipeline_status(
+            provider="local",
+            model=self._default_ollama_summary_model,
+        )
+        summary_counts = summary_pipeline.get("counts", {})
+        archive_counts["summary_queued"] = summary_counts.get("queued", summary_counts.get("pending", 0))
+        archive_counts["summary_failed"] = summary_counts.get("failed", 0)
 
         return {
             "device": {
@@ -278,10 +317,8 @@ class DashboardController:
             "folders": folders,
             "collections": collections,
             "saved_views": saved_views,
-            "summary_pipeline": self._sqlite_db_repository.get_summary_pipeline_status(
-                provider="local",
-                model=self._default_ollama_summary_model,
-            ),
+            "summary_pipeline": summary_pipeline,
+            "work_remaining": self._work_remaining_recommendation(archive_counts),
         }
 
     def upload_recording(self, filename: str, file_data: bytes, label: str = "") -> dict:
@@ -412,7 +449,7 @@ class DashboardController:
                 return candidate, ext_dot.lstrip(".")
         return f"{bare_name}.hda", "hda"
 
-    def transcribe_recording(self, name: str, engine: str = "gemini") -> dict:
+    def transcribe_recording(self, name: str, engine: str = "whisper") -> dict:
         bare_name = self._bare_name(name)
         local_filename, file_ext = self._resolve_local_filename(bare_name)
 
@@ -524,7 +561,7 @@ class DashboardController:
             )
         return {"ok": True, "count": len(untranscribed), "recordings": untranscribed}
 
-    def transcribe_recordings(self, names: list[str], engine: str = "gemini") -> dict:
+    def transcribe_recordings(self, names: list[str], engine: str = "whisper") -> dict:
         unique_names = []
         seen = set()
         for name in names:
@@ -597,7 +634,7 @@ class DashboardController:
 
         return {"ok": counts["failed"] == 0, "counts": counts, "results": results}
 
-    def transcribe_untranscribed_recordings(self, engine: str = "gemini") -> dict:
+    def transcribe_untranscribed_recordings(self, engine: str = "whisper") -> dict:
         untranscribed = self.list_untranscribed_recordings()
         names = [rec["name"] for rec in untranscribed["recordings"]]
         if not names:

@@ -64,7 +64,7 @@ GEMINI_MODEL=gemini-2.5-flash
 GEMINI_EMBEDDING_MODEL=text-embedding-001
 
 # Optional - Summary provider settings
-SUMMARY_PROVIDER=gemini              # gemini | local
+SUMMARY_PROVIDER=local               # local | gemini
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_SUMMARY_MODEL=qwen3:8b        # qwen3:8b | llama3.1:8b
 

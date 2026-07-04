@@ -1,6 +1,6 @@
 # Transcription
 
-Convert audio recordings to text using cloud-based (Gemini) or local (Whisper) speech-to-text engines.
+Convert audio recordings to text using local Whisper by default, with Gemini available when explicitly selected.
 
 ![Transcription](screenshots/transcription.png)
 
@@ -8,34 +8,34 @@ Convert audio recordings to text using cloud-based (Gemini) or local (Whisper) s
 
 ## Overview
 
-AgenDino offers two transcription engines. You can choose between them per recording depending on your needs.
+AgenDino offers two transcription engines. **Local Whisper is the default** for dashboard transcription actions. Gemini remains available from the engine dropdown when you explicitly want cloud transcription.
 
 ## Engine Comparison
 
-| Feature | Gemini (Cloud) | Whisper (Local) |
+| Feature | Whisper (Local) | Gemini (Cloud) |
 |---------|---------------|-----------------|
-| **Runs on** | Google Cloud | Your machine |
-| **Speaker diarization** | ✅ Automatic | ❌ Not included |
-| **Speaker labels** | ✅ Yes | ❌ No |
+| **Runs on** | Your machine | Google Cloud |
+| **Speaker diarization** | ❌ Not included | ✅ Automatic |
+| **Speaker labels** | ❌ No | ✅ Yes |
 | **Timestamps** | ✅ Yes | ✅ Yes |
-| **Long recordings** | ⚠️ May truncate | ✅ Full transcription |
-| **Privacy** | Audio sent to Google | Fully offline |
-| **First-use setup** | None | Model download (~500 MB for `small`) |
-| **Speed** | Fast (cloud) | Depends on hardware |
-
-## Using Gemini Transcription
-
-1. Select a synced or uploaded recording.
-2. Click the **Transcribe** button (microphone icon).
-3. Gemini processes the audio and returns a transcript with speaker diarization, labels, and timestamps.
-4. The transcript is saved to the database.
+| **Long recordings** | ✅ Full transcription | ⚠️ May truncate |
+| **Privacy** | Fully offline | Audio sent to Google |
+| **First-use setup** | Model download (~500 MB for `small`) | Gemini API key |
+| **Speed** | Depends on hardware | Fast (cloud) |
 
 ## Using Whisper Transcription
 
 1. Select a recording.
-2. Click the **dropdown arrow** next to the Transcribe button and choose **Whisper (local)**.
+2. Click the **Transcribe** button (microphone icon).
 3. On first use, the Whisper model is downloaded automatically.
 4. Transcription runs entirely on your machine - no audio is uploaded.
+
+## Using Gemini Transcription
+
+1. Select a synced or uploaded recording.
+2. Click the **dropdown arrow** next to the Transcribe button and choose **Gemini**.
+3. Gemini processes the audio and returns a transcript with speaker diarization, labels, and timestamps.
+4. The transcript is saved to the database.
 
 ### Whisper Configuration
 

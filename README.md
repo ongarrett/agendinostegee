@@ -13,7 +13,7 @@ AgenDino is a web-based dashboard for managing, transcribing, and summarizing au
 |---------|-------------|
 | [HiDock USB Integration](docs/hidock-integration.md) | Detect, sync, and manage recordings from HiDock H1 / H1E / P1 devices |
 | [Recording Management](docs/recording-management.md) | Upload, organize with folders, play back, and delete audio files |
-| [AI Transcription](docs/transcription.md) | Cloud (Gemini) and local (Whisper) speech-to-text with speaker diarization |
+| [AI Transcription](docs/transcription.md) | Local Whisper speech-to-text by default, with Gemini available when selected |
 | [AI Summarization](docs/summarization.md) | Structured summaries with Gemini or local Ollama models, customizable prompts, and multiple versions |
 | [Task Generation](docs/task-generation.md) | Extract Jira-style tasks and subtasks from meeting summaries |
 | [Calendar](docs/calendar.md) | Manual events, iCal subscriptions (Google Calendar, Outlook), recording linking |

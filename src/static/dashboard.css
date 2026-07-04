@@ -1085,3 +1085,12 @@
 .archive-health-grid span {
     white-space: nowrap;
 }
+
+.archive-next-action {
+    border: 1px solid var(--bs-border-color);
+    border-radius: 6px;
+    padding: 0.4rem 0.65rem;
+    background: var(--bs-body-bg);
+    font-size: 0.875rem;
+    font-weight: 600;
+}

@@ -21,6 +21,8 @@ def mock_services(tmp_path):
     system_prompts_repo = MagicMock()
     task_generation_service = MagicMock()
     transcription_service = MagicMock()
+    whisper_transcription_service = MagicMock()
+    whisper_transcription_service.last_result = {}
     summarization_service = MagicMock()
     ollama_summarization_service = MagicMock()
 
@@ -33,6 +35,7 @@ def mock_services(tmp_path):
         publish_services={},
         task_generation_service=task_generation_service,
         summarization_service=summarization_service,
+        whisper_transcription_service=whisper_transcription_service,
         ollama_summarization_service=ollama_summarization_service,
     )
 
@@ -41,6 +44,7 @@ def mock_services(tmp_path):
         "sqlite_db": sqlite_db,
         "local_repo": local_repo,
         "transcription_service": transcription_service,
+        "whisper_transcription_service": whisper_transcription_service,
         "summarization_service": summarization_service,
         "ollama_summarization_service": ollama_summarization_service,
         "system_prompts_repo": system_prompts_repo,
@@ -164,20 +168,36 @@ class TestDashboardControllerTranscribeRecording:
         mock_services["local_repo"].exists.return_value = True
         mock_services["sqlite_db"].get_recording_by_name.return_value = None
         mock_services["local_repo"].get_path.return_value = "/path/to/test.hda"
-        mock_services["transcription_service"].transcribe.return_value = "new transcript"
+        mock_services["whisper_transcription_service"].transcribe.return_value = "new transcript"
 
         result = ctrl.transcribe_recording("test")
         assert result["ok"] is True
         assert result["cached"] is False
         assert result["transcript"] == "new transcript"
         mock_services["sqlite_db"].save_transcript.assert_called_once_with("test", "new transcript")
+        mock_services["whisper_transcription_service"].transcribe.assert_called_once()
+        mock_services["transcription_service"].transcribe.assert_not_called()
+
+    def test_gemini_transcription_is_available_when_explicitly_selected(self, mock_services):
+        ctrl = mock_services["controller"]
+        mock_services["local_repo"].exists.return_value = True
+        mock_services["sqlite_db"].get_recording_by_name.return_value = None
+        mock_services["local_repo"].get_path.return_value = "/path/to/test.hda"
+        mock_services["transcription_service"].transcribe.return_value = "gemini transcript"
+
+        result = ctrl.transcribe_recording("test", engine="gemini")
+
+        assert result["ok"] is True
+        assert result["transcript"] == "gemini transcript"
+        mock_services["transcription_service"].transcribe.assert_called_once()
+        mock_services["whisper_transcription_service"].transcribe.assert_not_called()
 
     def test_transcription_failure(self, mock_services):
         ctrl = mock_services["controller"]
         mock_services["local_repo"].exists.return_value = True
         mock_services["sqlite_db"].get_recording_by_name.return_value = None
         mock_services["local_repo"].get_path.return_value = "/path/to/test.hda"
-        mock_services["transcription_service"].transcribe.side_effect = RuntimeError("API error")
+        mock_services["whisper_transcription_service"].transcribe.side_effect = RuntimeError("API error")
 
         result = ctrl.transcribe_recording("test")
         assert result["ok"] is False
@@ -190,7 +210,7 @@ class TestDashboardControllerTranscribeRecording:
             id=1, name="bad", label="Bad", duration=20, created_at=datetime.now(), transcript=None
         )
         mock_services["local_repo"].get_path.return_value = "/path/to/bad.mp3"
-        mock_services["transcription_service"].transcribe.side_effect = RuntimeError(
+        mock_services["whisper_transcription_service"].transcribe.side_effect = RuntimeError(
             "Invalid data found when processing input"
         )
 
@@ -208,7 +228,7 @@ class TestDashboardControllerTranscribeRecording:
             id=1, name="retry", label="Retry", duration=20, created_at=datetime.now(), transcript=None
         )
         mock_services["local_repo"].get_path.return_value = "/path/to/retry.mp3"
-        mock_services["transcription_service"].transcribe.side_effect = TimeoutError("timed out")
+        mock_services["whisper_transcription_service"].transcribe.side_effect = TimeoutError("timed out")
 
         result = ctrl.transcribe_recording("retry")
 
@@ -293,7 +313,7 @@ class TestDashboardControllerTranscribeRecording:
             id=1, name="test", label="Test", duration=60, created_at=datetime.now(), transcript=None
         )
         mock_services["local_repo"].get_path.return_value = "/path/to/test.hda"
-        mock_services["transcription_service"].transcribe.return_value = "new transcript"
+        mock_services["whisper_transcription_service"].transcribe.return_value = "new transcript"
 
         result = ctrl.transcribe_recordings(["test"])
 
@@ -301,6 +321,8 @@ class TestDashboardControllerTranscribeRecording:
         assert result["counts"]["transcribed"] == 1
         assert result["results"][0]["status"] == "transcribed"
         mock_services["sqlite_db"].save_transcript.assert_called_once_with("test", "new transcript")
+        mock_services["whisper_transcription_service"].transcribe.assert_called_once()
+        mock_services["transcription_service"].transcribe.assert_not_called()
 
     def test_transcribe_recordings_skips_existing_transcript(self, mock_services):
         ctrl = mock_services["controller"]
@@ -569,6 +591,82 @@ class TestDashboardControllerSummarizeRecording:
         assert result["counts"]["failed"] == 1
         assert result["counts"]["summarized"] == 1
         assert [item["status"] for item in result["results"]] == ["failed", "summarized"]
+
+
+class TestDashboardControllerArchiveProgress:
+    def test_archive_health_counts_include_work_remaining_fields(self):
+        recordings = [
+            {
+                "in_db": True,
+                "has_transcript": True,
+                "has_summary": True,
+                "transcription_status": "transcribed",
+                "embedding_status": "indexed",
+            },
+            {
+                "in_db": True,
+                "has_transcript": False,
+                "has_summary": False,
+                "transcription_status": "pending",
+                "embedding_status": "not indexed",
+            },
+            {
+                "in_db": True,
+                "has_transcript": True,
+                "has_summary": False,
+                "transcription_status": "transcribed",
+                "embedding_status": "failed",
+            },
+            {
+                "in_db": True,
+                "has_transcript": False,
+                "has_summary": False,
+                "transcription_status": "no_speech_detected",
+                "embedding_status": "not indexed",
+            },
+        ]
+
+        counts = DashboardController._archive_health_counts(recordings)
+
+        assert counts["total_recordings"] == 4
+        assert counts["transcribed"] == 2
+        assert counts["awaiting_transcription"] == 1
+        assert counts["no_speech_detected"] == 1
+        assert counts["missing_summaries"] == 1
+        assert counts["indexed"] == 1
+        assert counts["missing_embeddings"] == 3
+
+    def test_work_remaining_recommends_transcription_first(self):
+        result = DashboardController._work_remaining_recommendation(
+            {"awaiting_transcription": 2, "missing_summaries": 3, "missing_embeddings": 4}
+        )
+
+        assert result["action"] == "transcribe_awaiting"
+        assert result["label"] == "Next: Transcribe awaiting recordings"
+
+    def test_work_remaining_recommends_summaries_after_transcription(self):
+        result = DashboardController._work_remaining_recommendation(
+            {"awaiting_transcription": 0, "missing_summaries": 3, "missing_embeddings": 4}
+        )
+
+        assert result["action"] == "generate_missing_summaries"
+        assert result["label"] == "Next: Generate missing summaries"
+
+    def test_work_remaining_recommends_embeddings_after_summaries(self):
+        result = DashboardController._work_remaining_recommendation(
+            {"awaiting_transcription": 0, "missing_summaries": 0, "missing_embeddings": 4}
+        )
+
+        assert result["action"] == "index_unindexed"
+        assert result["label"] == "Next: Generate embeddings"
+
+    def test_work_remaining_reports_complete_archive(self):
+        result = DashboardController._work_remaining_recommendation(
+            {"awaiting_transcription": 0, "missing_summaries": 0, "missing_embeddings": 0}
+        )
+
+        assert result["action"] is None
+        assert result["label"] == "Archive is fully processed"
 
 
 class TestDashboardControllerMetadata:
